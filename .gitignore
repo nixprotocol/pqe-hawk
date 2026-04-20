@@ -1,0 +1,18 @@
+# Cargo
+/target
+/fuzz/target
+/fuzz/corpus
+/fuzz/artifacts
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# macOS
+.DS_Store
+
+# Proptest regression files are useful to commit when they pin a real
+# failing case; the runtime-generated `*.proptest-regressions` that only
+# contain sample seeds are noisy — keep the ones that are already tracked,
+# ignore any new ones created locally.

@@ -1,0 +1,706 @@
+diff --color --color=never -Naur hawk-orig/hawk.h hawk-mod/hawk.h
+--- hawk-orig/hawk.h	2026-04-20 07:28:49
++++ hawk-mod/hawk.h	2026-04-20 07:32:20
+@@ -4,6 +4,188 @@
+ #include <stddef.h>
+ #include <stdint.h>
+ 
++#ifdef HAWK_DEBUG_TRACE
++/* Debug trace hook: later tasks populate with concrete trace points.
++ * When HAWK_DEBUG_TRACE is defined, callers can register a trace callback;
++ * otherwise hawk_trace() compiles to a no-op. */
++typedef void (*hawk_trace_cb)(const char *tag, const void *data, size_t len);
++void hawk_trace_set_callback(hawk_trace_cb cb);
++void hawk_trace_emit(const char *tag, const void *data, size_t len);
++#define hawk_trace(tag, data, len) hawk_trace_emit((tag), (data), (len))
++/* Test wrapper: byte-exact polynomial addition over Z_q for q=18433, n=512.
++ * Loops mp_add over 512 coefficients. */
++void test_poly_add(const uint16_t *a, const uint16_t *b, uint16_t *out);
++/* Test wrappers: byte-exact NTT forward/inverse and NTT-mul over Z_q for q=18433, n=512.
++ * All inputs/outputs are in [0, q); domain conversion handled internally. */
++void test_ntt_forward(const uint16_t *in_coeffs, uint16_t *out_eval);
++void test_ntt_inverse(const uint16_t *in_eval, uint16_t *out_coeffs);
++void test_poly_mul_ntt(const uint16_t *a, const uint16_t *b, uint16_t *out);
++/* Test wrapper: byte-exact compute_hm = SHAKE256(msg || hpub) -> 64 bytes.
++ * Mirror of Rust pqe_hawk::hash::compute_hm. */
++void test_compute_hm(const uint8_t *msg, size_t msg_len,
++                     const uint8_t *hpub, size_t hpub_len,
++                     uint8_t out[64]);
++/* Test wrapper: byte-exact compute_h = SHAKE256(hm || salt) -> 2n bits.
++ * Returns h0 and h1, each of HAWK_N/8 = 64 bytes for HAWK-512. */
++void test_compute_h(const uint8_t hm[64],
++                    const uint8_t *salt, size_t salt_len,
++                    uint8_t out_h0[64], uint8_t out_h1[64]);
++/* Test wrapper: byte-exact sig_gauss_alt for HAWK-512 (logn=9).
++ * - rng_bytes:  must be exactly 10240 bytes (64 * 160).
++ * - t_parity:   128 bytes (HAWK_N/8 for HAWK-512).
++ * - x_out:      writes 1024 int8_t samples.
++ * Returns the squared norm. */
++uint32_t test_sample(const uint8_t *rng_bytes,
++                     const uint8_t *t_parity,
++                     int8_t *x_out);
++/* Test wrappers: byte-exact mp_* modular arithmetic helpers from ng_inner.h.
++ * Used to byte-diff the Rust port in src/keygen/mp31.rs against the C. */
++uint32_t test_mp_set(int32_t v, uint32_t p);
++int32_t test_mp_norm(uint32_t x, uint32_t p);
++uint32_t test_mp_r(uint32_t p);
++uint32_t test_mp_h_r(uint32_t p);
++uint32_t test_mp_add(uint32_t a, uint32_t b, uint32_t p);
++uint32_t test_mp_sub(uint32_t a, uint32_t b, uint32_t p);
++uint32_t test_mp_half(uint32_t a, uint32_t p);
++uint32_t test_mp_montymul(uint32_t a, uint32_t b, uint32_t p, uint32_t p0i);
++uint32_t test_mp_rx31(uint32_t e, uint32_t p, uint32_t p0i, uint32_t r2);
++/* 15.5: FFI wrappers for mp_NTT / mp_iNTT at logn=9 over PRIMES[0]. */
++void test_mp_ntt(const uint32_t *a_in, uint32_t *b_out,
++                 uint32_t g, uint32_t p, uint32_t p0i);
++void test_mp_intt(const uint32_t *a_in, uint32_t *b_out,
++                  uint32_t ig, uint32_t p, uint32_t p0i);
++/* 15.7: FFI wrappers for zint primitives (stride=1). */
++uint32_t test_zint_mul_small(uint32_t *m, size_t len, uint32_t x);
++uint32_t test_zint_mod_small_unsigned(
++    const uint32_t *d, size_t len, size_t stride,
++    uint32_t p, uint32_t p0i, uint32_t R2);
++void test_zint_add_mul_small(
++    uint32_t *x, size_t len, size_t xstride,
++    const uint32_t *y, uint32_t s);
++void test_zint_norm_zero(
++    uint32_t *x, size_t len, size_t xstride, const uint32_t *p);
++/* 15.9: FFI wrappers for zint_rebuild_CRT and zint_negate. */
++void test_zint_negate(uint32_t *a, size_t len, uint32_t ctl);
++void test_zint_rebuild_crt(uint32_t *xx, size_t xlen, size_t n,
++                           size_t num_sets, int normalize_signed,
++                           uint32_t *tmp);
++/* 15.10b: FFI wrappers for zint_bezout, zint_add_scaled_mul_small, zint_sub_scaled. */
++int test_zint_bezout(
++    uint32_t *u, uint32_t *v,
++    const uint32_t *x, const uint32_t *y,
++    size_t len, uint32_t *tmp);
++void test_zint_add_scaled_mul_small(
++    uint32_t *x, size_t xlen,
++    const uint32_t *y, size_t ylen, size_t stride,
++    int32_t k, uint32_t sch, uint32_t scl);
++void test_zint_sub_scaled(
++    uint32_t *x, size_t xlen,
++    const uint32_t *y, size_t ylen, size_t stride,
++    uint32_t sch, uint32_t scl);
++/* 15.13: FFI wrappers for Fxr. Pass/return raw u64 bit patterns
++ * to sidestep ABI ambiguity around the fxr struct. */
++uint64_t test_fxr_mul(uint64_t x, uint64_t y);
++uint64_t test_fxr_div(uint64_t x, uint64_t y);
++uint64_t test_fxr_inv(uint64_t x);
++int64_t test_fxr_round(uint64_t x);
++/* 15.16: FFI wrappers for vect_FFT / vect_iFFT / vect_mul_fft. */
++void test_vect_fft(unsigned logn, uint64_t *f);
++void test_vect_ifft(unsigned logn, uint64_t *f);
++void test_vect_mul_fft(unsigned logn, uint64_t *a, const uint64_t *b);
++/* 15.18b: FFI wrapper for static solve_NTRU_deepest.
++ * prof is passed as void* to avoid exposing ntru_profile here; the wrapper
++ * in ng_ntru.c casts it back to ntru_profile*.
++ * tmp is the in-place scratch buffer (size >= 32*n u32 words); on success
++ * it holds (F | G) at tmp[0..2*len] where len = max_bl_small[logn_top]. */
++int test_solve_ntru_deepest(
++    const void *prof, unsigned logn_top,
++    const int8_t *f, const int8_t *g,
++    uint32_t *tmp);
++/* 15.19d: FFI wrapper for solve_NTRU_intermediate at a chosen depth.
++ * Runs solve_NTRU_deepest first, then one call to solve_NTRU_intermediate
++ * at the given depth. The caller must supply a tmp buffer large enough for
++ * the pipeline (64*n u32 words is safe for HAWK-512). */
++int test_solve_ntru_intermediate_after_deepest(
++    const void *prof,
++    unsigned logn_top,
++    const int8_t *f, const int8_t *g,
++    unsigned depth,
++    uint32_t *tmp);
++/* 15.21: FFI wrapper for solve_NTRU (end-to-end).
++ * Runs the full NTRU pipeline: deepest + intermediate depths + depth0 +
++ * poly_big_to_small conversion. Returns SOLVE_OK on success. */
++int test_solve_ntru(
++    const void *prof,
++    unsigned logn,
++    const int8_t *f, const int8_t *g,
++    uint32_t *tmp);
++/* 15.22b: FFI wrapper for Hawk_regen_fg. */
++void test_hawk_regen_fg(unsigned logn, int8_t *f, int8_t *g, const void *seed);
++/* 15.23: FFI wrapper for make_q001.
++ * Takes int8 (f, g, F, G) plus limits, writes q00 (int16[n]), q01 (int16[n]),
++ * q11 (int32[n]) separately. Returns 1 on success, 0 on failure. */
++int test_make_q001(
++    unsigned logn,
++    int lim00, int lim01, int32_t lim11,
++    const int8_t *f, const int8_t *g,
++    const int8_t *F, const int8_t *G,
++    int16_t *q00_out, int16_t *q01_out, int32_t *q11_out,
++    uint32_t *tmp);
++/* 15.24: FFI wrapper for Hawk_keygen end-to-end.
++ * rng_bytes / rng_len supply a pre-filled entropy buffer dispensed
++ * sequentially (identical to the Rust rng closure).
++ * tmp must be at least 20*n u32 words (passed as byte count tmp_len).
++ * Returns 0 on success. */
++int test_hawk_keygen(
++    unsigned logn,
++    const uint8_t *rng_bytes, size_t rng_len,
++    int8_t *f_out, int8_t *g_out,
++    int8_t *F_out, int8_t *G_out,
++    int16_t *q00_out, int16_t *q01_out, int32_t *q11_out,
++    uint8_t *seed_out,
++    uint32_t *tmp, size_t tmp_len);
++/* Task 19: FFI wrapper for the combined keygen+encode pipeline.
++ * Calls hawk_keygen (the public API) which internally does Hawk_keygen +
++ * encode_public + encode_private, then copies out the 184-byte sk and
++ * 1024-byte pk. Returns 1 on success (matching hawk_keygen convention). */
++int test_hawk_keygen_encoded(
++    const uint8_t *rng_bytes, size_t rng_len,
++    uint8_t *sk_out,   /* HAWK_PRIVKEY_SIZE(9) = 184 bytes */
++    uint8_t *pk_out,   /* HAWK_PUBKEY_SIZE(9)  = 1024 bytes */
++    void *tmp, size_t tmp_len);
++/* Sub-task 22a: FFI wrappers for bp_mulmod_512 and basis_m2_mul.
++ * bp_mulmod_512: d[64] = a[64]*b[64] mod X^512+1 in GF(2)[X].
++ *   tmp must be >= 160 bytes.
++ * basis_m2_mul: (t0,t1) = B*h mod 2, B = [[f F],[g G]].
++ *   Calls basis_m2_mul(logn=9, ...).  tmp must be >= 224 bytes. */
++void test_bp_mulmod_512(uint8_t *d, const uint8_t *a, const uint8_t *b, uint8_t *tmp);
++void test_basis_m2_mul(
++    uint8_t *t0, uint8_t *t1,
++    const uint8_t *h0, const uint8_t *h1,
++    const uint8_t *f2, const uint8_t *g2,
++    const uint8_t *F2, const uint8_t *G2,
++    uint8_t *tmp);
++/* Sub-task 24.5: FFI wrappers for fx32_FFT / fx32_iFFT (static in hawk_vrfy.c). */
++void test_fx32_fft(unsigned logn, uint32_t *a);
++void test_fx32_ifft(unsigned logn, uint32_t *a);
++/* Sub-task 24.9: FFI wrappers for verify's mp_div, mp_NTT_autoadj, mp_poly_to_NTT[_autoadj]. */
++uint32_t test_verify_mp_div(uint32_t x, uint32_t y, uint32_t p, uint32_t p0i, uint32_t m16);
++void test_mp_ntt_autoadj(unsigned logn, uint32_t *a, const uint32_t *gm, uint32_t p, uint32_t p0i);
++void test_mp_poly_to_ntt(unsigned logn, uint32_t *d, const int16_t *a, uint32_t p, uint32_t p0i, const uint32_t *gm);
++void test_mp_poly_to_ntt_autoadj(unsigned logn, uint32_t *d, const int16_t *a, uint32_t p, uint32_t p0i, const uint32_t *gm);
++/* Sub-task 24.13: FFI wrapper for full HAWK-512 signature verification.
++ * Calls hawk_sign_start (= hawk_verify_start), injects msg, then calls
++ * hawk_verify_finish. Returns 1 if the signature is valid, 0 otherwise.
++ * tmp must be at least 10*512*4 = 20480 bytes. */
++int test_hawk_verify(
++    const uint8_t *pub_bytes, size_t pub_len,
++    const uint8_t *msg, size_t msg_len,
++    const uint8_t *sig_bytes, size_t sig_len,
++    void *tmp, size_t tmp_len);
++#else
++#define hawk_trace(tag, data, len) ((void)0)
++#endif
++
+ #include "sha3.h"
+ 
+ /*
+diff --color --color=never -Naur hawk-orig/hawk_sign.c hawk-mod/hawk_sign.c
+--- hawk-orig/hawk_sign.c	2026-04-20 07:28:49
++++ hawk-mod/hawk_sign.c	2026-04-20 07:28:49
+@@ -1194,3 +1194,105 @@
+ 	memmove(g + n, (const uint8_t *)priv + seed_len, (n >> 2) + hpub_len);
+ 	Hawk_regen_fg(logn, f, g, seed);
+ }
++
++/* Debug trace implementation, compiled only when HAWK_DEBUG_TRACE is defined. */
++#ifdef HAWK_DEBUG_TRACE
++#include <assert.h>
++#include <stddef.h>
++typedef void (*hawk_trace_cb)(const char *tag, const void *data, size_t len);
++static hawk_trace_cb g_trace_cb = 0;
++void hawk_trace_set_callback(hawk_trace_cb cb) { g_trace_cb = cb; }
++void hawk_trace_emit(const char *tag, const void *data, size_t len) {
++    if (g_trace_cb) g_trace_cb(tag, data, len);
++}
++
++/* Test wrappers: byte-exact forward/inverse NTT and NTT-mul over Z_q for q=18433, n=512.
++ * All inputs/outputs are in [0, q) representation; the wrappers handle the
++ * [1..q] domain conversion internally to match the Rust API. */
++
++static void hawk_test_lift_to_mq(const uint16_t *src, uint16_t *dst) {
++    for (size_t i = 0; i < 512; i++) {
++        uint16_t v = src[i];
++        dst[i] = (v == 0) ? (uint16_t)18433u : v;
++    }
++}
++
++static void hawk_test_lift_from_mq(uint16_t *buf) {
++    for (size_t i = 0; i < 512; i++) {
++        buf[i] = (uint16_t)mq18433_unorm((uint32_t)buf[i]);
++    }
++}
++
++void test_ntt_forward(const uint16_t *in_coeffs, uint16_t *out_eval) {
++    hawk_test_lift_to_mq(in_coeffs, out_eval);
++    mq18433_NTT(9, out_eval);
++    hawk_test_lift_from_mq(out_eval);
++}
++
++void test_ntt_inverse(const uint16_t *in_eval, uint16_t *out_coeffs) {
++    hawk_test_lift_to_mq(in_eval, out_coeffs);
++    mq18433_iNTT(9, out_coeffs);
++    hawk_test_lift_from_mq(out_coeffs);
++}
++
++void test_poly_mul_ntt(const uint16_t *a, const uint16_t *b, uint16_t *out) {
++    uint16_t buf_a[512], buf_b[512];
++    hawk_test_lift_to_mq(a, buf_a);
++    hawk_test_lift_to_mq(b, buf_b);
++    mq18433_NTT(9, buf_a);
++    mq18433_NTT(9, buf_b);
++    /* pointwise: tomonty(montymul(a[i], b[i])) — matches Rust pointwise_mul */
++    for (size_t i = 0; i < 512; i++) {
++        out[i] = (uint16_t)mq18433_tomonty(mq18433_montymul((uint32_t)buf_a[i], (uint32_t)buf_b[i]));
++    }
++    mq18433_iNTT(9, out);
++    hawk_test_lift_from_mq(out);
++}
++
++/* RNG callback that just memcpys from a pre-supplied byte buffer.
++ * Used by test_sample to feed identical entropy to Rust and C. */
++struct test_rng_ctx {
++    const uint8_t *buf;
++    size_t pos;
++    size_t cap;
++};
++
++static void test_rng_callback(void *ctx_v, void *dst, size_t len) {
++    struct test_rng_ctx *ctx = (struct test_rng_ctx *)ctx_v;
++    assert(ctx->pos + len <= ctx->cap);
++    memcpy(dst, ctx->buf + ctx->pos, len);
++    ctx->pos += len;
++}
++
++/* Test wrapper: byte-exact sig_gauss_alt for HAWK-512 (logn=9).
++ * - rng_bytes:  must be exactly 10240 bytes (64 * 160).
++ * - t_parity:   128 bytes (HAWK_N/8 for HAWK-512).
++ * - x_out:      writes 1024 int8_t samples.
++ * Returns the squared norm. */
++uint32_t test_sample(const uint8_t *rng_bytes,
++                     const uint8_t *t_parity,
++                     int8_t *x_out) {
++    struct test_rng_ctx ctx = { rng_bytes, 0, 10240 };
++    return sig_gauss_alt(9, test_rng_callback, &ctx, x_out, t_parity);
++}
++
++/* Sub-task 22a: byte-exact wrapper for bp_mulmod_512 (static in hawk_sign.c).
++ * d[64] = a[64] * b[64] mod X^512+1 in GF(2)[X].
++ * tmp must be >= 160 bytes. */
++void test_bp_mulmod_512(uint8_t *d, const uint8_t *a, const uint8_t *b, uint8_t *tmp) {
++    bp_mulmod_512(d, a, b, tmp);
++}
++
++/* Sub-task 22a: byte-exact wrapper for basis_m2_mul at logn=9.
++ * (t0, t1) = B*h mod 2, B = [[f2 F2],[g2 G2]].
++ * tmp must be >= 224 bytes. */
++void test_basis_m2_mul(
++    uint8_t *t0, uint8_t *t1,
++    const uint8_t *h0, const uint8_t *h1,
++    const uint8_t *f2, const uint8_t *g2,
++    const uint8_t *F2, const uint8_t *G2,
++    uint8_t *tmp)
++{
++    basis_m2_mul(9, t0, t1, h0, h1, f2, g2, F2, G2, tmp);
++}
++#endif
+diff --color --color=never -Naur hawk-orig/hawk_vrfy.c hawk-mod/hawk_vrfy.c
+--- hawk-orig/hawk_vrfy.c	2026-04-20 07:28:49
++++ hawk-mod/hawk_vrfy.c	2026-04-20 07:35:27
+@@ -2217,3 +2217,44 @@
+ 	return Zh(verify_inner)(logn, sig, sig_len, sc_data,
+ 		pub, pub_len, tt32, tmp_len, NULL);
+ }
++
++#ifdef HAWK_DEBUG_TRACE
++void test_fx32_fft(unsigned logn, uint32_t *a) {
++    fx32_FFT(logn, a);
++}
++
++void test_fx32_ifft(unsigned logn, uint32_t *a) {
++    fx32_iFFT(logn, a);
++}
++
++uint32_t test_verify_mp_div(uint32_t x, uint32_t y, uint32_t p, uint32_t p0i, uint32_t m16) {
++    return mp_div(x, y, p, p0i, m16);
++}
++
++void test_mp_ntt_autoadj(unsigned logn, uint32_t *a, const uint32_t *gm, uint32_t p, uint32_t p0i) {
++    mp_NTT_autoadj(logn, a, gm, p, p0i);
++}
++
++void test_mp_poly_to_ntt(unsigned logn, uint32_t *d, const int16_t *a, uint32_t p, uint32_t p0i, const uint32_t *gm) {
++    mp_poly_to_NTT(logn, d, a, p, p0i, gm);
++}
++
++void test_mp_poly_to_ntt_autoadj(unsigned logn, uint32_t *d, const int16_t *a, uint32_t p, uint32_t p0i, const uint32_t *gm) {
++    mp_poly_to_NTT_autoadj(logn, d, a, p, p0i, gm);
++}
++
++/* Sub-task 24.13: full HAWK-512 verify FFI wrapper.
++ * Uses the public hawk_verify_start + hawk_verify_finish API so we test the
++ * entire pipeline rather than just internal helpers. */
++int test_hawk_verify(
++    const uint8_t *pub_bytes, size_t pub_len,
++    const uint8_t *msg, size_t msg_len,
++    const uint8_t *sig_bytes, size_t sig_len,
++    void *tmp, size_t tmp_len)
++{
++    shake_context sc;
++    hawk_sign_start(&sc);
++    shake_inject(&sc, msg, msg_len);
++    return hawk_verify_finish(9, sig_bytes, sig_len, &sc, pub_bytes, pub_len, tmp, tmp_len);
++}
++#endif
+diff --color --color=never -Naur hawk-orig/ng_hawk.c hawk-mod/ng_hawk.c
+--- hawk-orig/ng_hawk.c	2026-04-20 07:28:49
++++ hawk-mod/ng_hawk.c	2026-04-20 07:28:49
+@@ -788,3 +788,91 @@
+ 	}
+ 	return 0;
+ }
++
++/* 15.23: FFI wrapper for make_q001. Takes int8 (f, g, F, G) plus limits,
++ * writes q00 (int16[n]), q01 (int16[n]), q11 (int32[n]) separately.
++ * After make_q001 succeeds, tmp layout is:
++ *   tmp[0..n/2]   (as u32) = q00 (n int16 packed 2 per u32)
++ *   tmp[n/2..n]   (as u32) = q01 (n int16 packed 2 per u32)
++ *   tmp[n..2n]    (as u32) = q11 (n int32, one per u32)
++ * We use byte-offset arithmetic to extract each field. */
++#ifdef HAWK_DEBUG_TRACE
++int test_make_q001(
++    unsigned logn,
++    int lim00, int lim01, int32_t lim11,
++    const int8_t *f, const int8_t *g,
++    const int8_t *F, const int8_t *G,
++    int16_t *q00_out, int16_t *q01_out, int32_t *q11_out,
++    uint32_t *tmp)
++{
++    int r = make_q001(logn, lim00, lim01, lim11, f, g, F, G, tmp);
++    if (r) {
++        size_t n = (size_t)1 << logn;
++        /* q00: first n int16 starting at tmp byte offset 0. */
++        memcpy(q00_out, (const uint8_t *)tmp, n * sizeof(int16_t));
++        /* q01: next n int16 starting at byte offset n*sizeof(int16_t). */
++        memcpy(q01_out, (const uint8_t *)tmp + n * sizeof(int16_t),
++               n * sizeof(int16_t));
++        /* q11: at tmp[n] (u32 offset n = byte offset n*4). */
++        memcpy(q11_out, tmp + n, n * sizeof(int32_t));
++    }
++    return r;
++}
++
++/* 15.24: FFI wrapper for Hawk_keygen end-to-end.
++ * rng_bytes / rng_len supply a pre-filled entropy buffer dispensed
++ * sequentially (identical to the Rust rng closure). */
++#include <assert.h>
++struct test_hawk_keygen_rng_ctx {
++    const uint8_t *buf;
++    size_t pos;
++    size_t cap;
++};
++
++static void test_hawk_keygen_rng_cb(void *ctx_v, void *dst, size_t len) {
++    struct test_hawk_keygen_rng_ctx *ctx = ctx_v;
++    assert(ctx->pos + len <= ctx->cap);
++    memcpy(dst, ctx->buf + ctx->pos, len);
++    ctx->pos += len;
++}
++
++int test_hawk_keygen(
++    unsigned logn,
++    const uint8_t *rng_bytes, size_t rng_len,
++    int8_t *f_out, int8_t *g_out,
++    int8_t *F_out, int8_t *G_out,
++    int16_t *q00_out, int16_t *q01_out, int32_t *q11_out,
++    uint8_t *seed_out,
++    uint32_t *tmp, size_t tmp_len)
++{
++    struct test_hawk_keygen_rng_ctx rngctx = { rng_bytes, 0, rng_len };
++    return Hawk_keygen(logn,
++        f_out, g_out, F_out, G_out,
++        q00_out, q01_out, q11_out,
++        seed_out,
++        test_hawk_keygen_rng_cb, &rngctx,
++        tmp, tmp_len);
++}
++
++/* Task 19: FFI wrapper for the combined keygen+encode pipeline.
++ * Delegates to hawk_keygen (the public API from hawk.h) which runs
++ * Hawk_keygen in a retry loop until encode_public succeeds, then calls
++ * encode_private. Returns 1 on success (hawk_keygen convention). */
++/* Forward-declare hawk_keygen from hawk.h (ng_hawk.c doesn't include hawk.h).
++ * hawk_rng is typedef void(*)(void*,void*,size_t); inline it here to avoid
++ * pulling in hawk.h. */
++extern int hawk_keygen(unsigned logn, void *priv, void *pub,
++    void (*rng)(void *, void *, size_t), void *rng_context,
++    void *tmp, size_t tmp_len);
++int test_hawk_keygen_encoded(
++    const uint8_t *rng_bytes, size_t rng_len,
++    uint8_t *sk_out,
++    uint8_t *pk_out,
++    void *tmp, size_t tmp_len)
++{
++    struct test_hawk_keygen_rng_ctx rngctx = { rng_bytes, 0, rng_len };
++    return hawk_keygen(9, sk_out, pk_out,
++        test_hawk_keygen_rng_cb, &rngctx,
++        tmp, tmp_len);
++}
++#endif
+diff --color --color=never -Naur hawk-orig/ng_ntru.c hawk-mod/ng_ntru.c
+--- hawk-orig/ng_ntru.c	2026-04-20 07:28:49
++++ hawk-mod/ng_ntru.c	2026-04-20 07:28:49
+@@ -1123,3 +1123,44 @@
+ 	stats_compute_w_success = 0;
+ }
+ #endif
++
++/* 15.18b: FFI wrapper for static solve_NTRU_deepest.
++ * Returns the C solver result; tmp is the in-place scratch buffer that also
++ * holds the output (F | G) on success. */
++#ifdef HAWK_DEBUG_TRACE
++int test_solve_ntru_deepest(
++    const void *prof, unsigned logn_top,
++    const int8_t *f, const int8_t *g,
++    uint32_t *tmp)
++{
++    return solve_NTRU_deepest((const ntru_profile *)prof, logn_top, f, g, tmp);
++}
++
++/* 15.19d: FFI wrapper for solve_NTRU_intermediate at a chosen depth.
++ * This wrapper runs solve_NTRU_deepest first, then solve_NTRU_intermediate
++ * at the given depth (one call). The caller is responsible for supplying
++ * a tmp buffer large enough for the pipeline. */
++int test_solve_ntru_intermediate_after_deepest(
++    const void *prof,
++    unsigned logn_top,
++    const int8_t *f, const int8_t *g,
++    unsigned depth,
++    uint32_t *tmp)
++{
++    int r = solve_NTRU_deepest((const ntru_profile *)prof, logn_top, f, g, tmp);
++    if (r != SOLVE_OK) {
++        return r;
++    }
++    return solve_NTRU_intermediate((const ntru_profile *)prof, logn_top, f, g, depth, tmp);
++}
++
++/* 15.21: FFI wrapper for solve_NTRU (end-to-end). */
++int test_solve_ntru(
++    const void *prof,
++    unsigned logn,
++    const int8_t *f, const int8_t *g,
++    uint32_t *tmp)
++{
++    return solve_NTRU((const ntru_profile *)prof, logn, f, g, tmp);
++}
++#endif
+diff --color --color=never -Naur hawk-orig/ng_poly.c hawk-mod/ng_poly.c
+--- hawk-orig/ng_poly.c	2026-04-20 07:28:49
++++ hawk-mod/ng_poly.c	2026-04-20 07:28:49
+@@ -821,3 +821,210 @@
+ 	}
+ 	return s;
+ }
++
++#ifdef HAWK_DEBUG_TRACE
++/* Test-only wrapper exposing mp_add (ng_inner.h:422-427) for FFI cross-check. */
++void test_poly_add(const uint16_t *a, const uint16_t *b, uint16_t *out) {
++    for (size_t i = 0; i < 512; i++) {
++        out[i] = (uint16_t)mp_add((uint32_t)a[i], (uint32_t)b[i], 18433u);
++    }
++}
++
++/* Test wrapper: byte-exact compute_hm = SHAKE256(msg || hpub) -> 64 bytes.
++ * Mirror of Rust pqe_hawk::hash::compute_hm. */
++void test_compute_hm(const uint8_t *msg, size_t msg_len,
++                     const uint8_t *hpub, size_t hpub_len,
++                     uint8_t out[64]) {
++    shake_context sc;
++    shake_init(&sc, 256);
++    shake_inject(&sc, msg, msg_len);
++    shake_inject(&sc, hpub, hpub_len);
++    shake_flip(&sc);
++    shake_extract(&sc, out, 64);
++}
++
++/* Test wrapper: byte-exact compute_h = SHAKE256(hm || salt) -> 2n bits.
++ * Returns h0 and h1, each of HAWK_N/8 = 64 bytes for HAWK-512. */
++void test_compute_h(const uint8_t hm[64],
++                    const uint8_t *salt, size_t salt_len,
++                    uint8_t out_h0[64], uint8_t out_h1[64]) {
++    shake_context sc;
++    shake_init(&sc, 256);
++    shake_inject(&sc, hm, 64);
++    shake_inject(&sc, salt, salt_len);
++    shake_flip(&sc);
++    shake_extract(&sc, out_h0, 64);
++    shake_extract(&sc, out_h1, 64);
++}
++
++/* Task 15.3: FFI wrappers for mp_* inline helpers from ng_inner.h.
++ * Used to byte-diff the Rust port in src/keygen/mp31.rs against the C. */
++
++uint32_t test_mp_set(int32_t v, uint32_t p) {
++    return mp_set(v, p);
++}
++
++int32_t test_mp_norm(uint32_t x, uint32_t p) {
++    return mp_norm(x, p);
++}
++
++uint32_t test_mp_r(uint32_t p) {
++    return mp_R(p);
++}
++
++uint32_t test_mp_h_r(uint32_t p) {
++    return mp_hR(p);
++}
++
++uint32_t test_mp_add(uint32_t a, uint32_t b, uint32_t p) {
++    return mp_add(a, b, p);
++}
++
++uint32_t test_mp_sub(uint32_t a, uint32_t b, uint32_t p) {
++    return mp_sub(a, b, p);
++}
++
++uint32_t test_mp_half(uint32_t a, uint32_t p) {
++    return mp_half(a, p);
++}
++
++uint32_t test_mp_montymul(uint32_t a, uint32_t b, uint32_t p, uint32_t p0i) {
++    return mp_montymul(a, b, p, p0i);
++}
++
++uint32_t test_mp_rx31(uint32_t e, uint32_t p, uint32_t p0i, uint32_t r2) {
++    return mp_Rx31(e, p, p0i, r2);
++}
++
++/* 15.5: FFI wrappers for mp_NTT / mp_iNTT at logn=9 over PRIMES[0]. */
++
++/* Forward NTT. Takes coefficients a[512] in [0, p), returns eval-form in b[512].
++ * Caller supplies g, p, p0i so the Rust and C paths agree on prime. */
++void test_mp_ntt(const uint32_t *a_in, uint32_t *b_out,
++                 uint32_t g, uint32_t p, uint32_t p0i) {
++    uint32_t buf[512];
++    uint32_t gm[512];
++    memcpy(buf, a_in, sizeof buf);
++    mp_mkgm(9, gm, g, p, p0i);
++    mp_NTT(9, buf, gm, p, p0i);
++    memcpy(b_out, buf, sizeof buf);
++}
++
++/* Inverse NTT. */
++void test_mp_intt(const uint32_t *a_in, uint32_t *b_out,
++                  uint32_t ig, uint32_t p, uint32_t p0i) {
++    uint32_t buf[512];
++    uint32_t igm[512];
++    memcpy(buf, a_in, sizeof buf);
++    mp_mkigm(9, igm, ig, p, p0i);
++    mp_iNTT(9, buf, igm, p, p0i);
++    memcpy(b_out, buf, sizeof buf);
++}
++
++/* 15.7: FFI wrappers for zint primitives (stride=1). */
++
++uint32_t test_zint_mul_small(uint32_t *m, size_t len, uint32_t x) {
++    return zint_mul_small(m, len, x);
++}
++
++uint32_t test_zint_mod_small_unsigned(
++    const uint32_t *d, size_t len, size_t stride,
++    uint32_t p, uint32_t p0i, uint32_t R2)
++{
++    return zint_mod_small_unsigned(d, len, stride, p, p0i, R2);
++}
++
++void test_zint_add_mul_small(
++    uint32_t *x, size_t len, size_t xstride,
++    const uint32_t *y, uint32_t s)
++{
++    zint_add_mul_small(x, len, xstride, y, s);
++}
++
++void test_zint_norm_zero(
++    uint32_t *x, size_t len, size_t xstride, const uint32_t *p)
++{
++    zint_norm_zero(x, len, xstride, p);
++}
++
++/* 15.9: FFI wrappers for zint_rebuild_CRT and zint_negate. */
++
++void test_zint_negate(uint32_t *a, size_t len, uint32_t ctl) {
++    zint_negate(a, len, ctl);
++}
++
++void test_zint_rebuild_crt(uint32_t *xx, size_t xlen, size_t n,
++                           size_t num_sets, int normalize_signed,
++                           uint32_t *tmp) {
++    zint_rebuild_CRT(xx, xlen, n, num_sets, normalize_signed, tmp);
++}
++
++/* 15.10b: FFI wrappers for zint_bezout, zint_add_scaled_mul_small, zint_sub_scaled. */
++
++int test_zint_bezout(
++    uint32_t *u, uint32_t *v,
++    const uint32_t *x, const uint32_t *y,
++    size_t len, uint32_t *tmp)
++{
++    return zint_bezout(u, v, x, y, len, tmp);
++}
++
++void test_zint_add_scaled_mul_small(
++    uint32_t *x, size_t xlen,
++    const uint32_t *y, size_t ylen, size_t stride,
++    int32_t k, uint32_t sch, uint32_t scl)
++{
++    zint_add_scaled_mul_small(x, xlen, y, ylen, stride, k, sch, scl);
++}
++
++void test_zint_sub_scaled(
++    uint32_t *x, size_t xlen,
++    const uint32_t *y, size_t ylen, size_t stride,
++    uint32_t sch, uint32_t scl)
++{
++    zint_sub_scaled(x, xlen, y, ylen, stride, sch, scl);
++}
++
++/* 15.13: FFI wrappers for Fxr. Pass/return raw u64 bit patterns
++ * to sidestep ABI ambiguity around the fxr struct. */
++
++uint64_t test_fxr_mul(uint64_t x, uint64_t y) {
++    fxr xf = { x }, yf = { y };
++    return fxr_mul(xf, yf).v;
++}
++
++uint64_t test_fxr_div(uint64_t x, uint64_t y) {
++    fxr xf = { x }, yf = { y };
++    return fxr_div(xf, yf).v;
++}
++
++uint64_t test_fxr_inv(uint64_t x) {
++    fxr xf = { x };
++    return fxr_inv(xf).v;
++}
++
++int64_t test_fxr_round(uint64_t x) {
++    fxr xf = { x };
++    return fxr_round(xf);
++}
++
++/* 15.16: FFI wrappers for vect_FFT, vect_iFFT, vect_mul_fft.
++ * Buffers passed as u64 arrays (fxr is { uint64_t v; } so layout matches). */
++
++void test_vect_fft(unsigned logn, uint64_t *f) {
++    vect_FFT(logn, (fxr *)f);
++}
++
++void test_vect_ifft(unsigned logn, uint64_t *f) {
++    vect_iFFT(logn, (fxr *)f);
++}
++
++void test_vect_mul_fft(unsigned logn, uint64_t *a, const uint64_t *b) {
++    vect_mul_fft(logn, (fxr *)a, (const fxr *)b);
++}
++
++/* 15.22b: FFI wrapper for Hawk_regen_fg. */
++void test_hawk_regen_fg(unsigned logn, int8_t *f, int8_t *g, const void *seed) {
++    Hawk_regen_fg(logn, f, g, seed);
++}
++#endif

@@ -1,0 +1,10 @@
+# The PQC KAT file is generated from the reference C harness with a fixed
+# seed; it is reference data, not authored source. Suppress it from diffs
+# and from GitHub's Linguist language stats.
+c-reference/kat_vectors/PQCsignKAT_HAWK-512.rsp linguist-generated=true -diff
+
+# Vendored C reference is not Rust source.
+c-reference/hawk-512/**                          linguist-vendored=true
+
+# Binary KAT pins: diff-suppressed.
+tests/kat_vectors/*.bin                          binary

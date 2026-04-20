@@ -1,0 +1,33 @@
+[package]
+name = "pqe-hawk-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+pqe-hawk = { path = ".." }
+
+[[bin]]
+name = "fuzz_decode_pubkey"
+path = "fuzz_targets/fuzz_decode_pubkey.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_decode_signature"
+path = "fuzz_targets/fuzz_decode_signature.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_verify"
+path = "fuzz_targets/fuzz_verify.rs"
+test = false
+doc = false
+
+[profile.release]
+debug = 1

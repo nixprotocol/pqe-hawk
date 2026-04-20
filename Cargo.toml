@@ -1,0 +1,46 @@
+[package]
+name = "pqe-hawk"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/nixprotocol/pqe-hawk"
+authors = ["PQE Chain Contributors"]
+description = "Pure-Rust port of the HAWK-512 post-quantum signature scheme, byte-exact against the reference C."
+readme = "README.md"
+keywords = ["cryptography", "post-quantum", "signature", "lattice", "hawk"]
+categories = ["cryptography"]
+
+[dependencies]
+sha3 = "0.10"
+rand = "0.8"
+thiserror = "1"
+zeroize = { version = "1", features = ["derive"] }
+subtle = "2"
+
+[dev-dependencies]
+proptest = "1"
+rand_chacha = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hex = "0.4"
+aes = "0.8"
+cipher = "0.4"
+
+[features]
+default = []
+cross-check-reference-c = ["dep:cc", "dep:bindgen"]
+# Enable slow / expensive proptests (keygen-heavy fuzz cases).
+slow-tests = []
+
+[build-dependencies]
+cc = { version = "1", optional = true }
+bindgen = { version = "0.69", optional = true }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+
+[profile.dev]
+opt-level = 1
