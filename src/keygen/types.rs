@@ -80,7 +80,7 @@ pub struct HawkSecretKey {
 ///
 /// Generate with [`HawkKeypair::generate`]:
 ///
-/// ```ignore
+/// ```no_run
 /// use pqe_hawk::HawkKeypair;
 /// use rand::rngs::OsRng;
 ///

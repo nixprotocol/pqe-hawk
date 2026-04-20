@@ -5,6 +5,8 @@
 //! implementation at `github.com/hawk-sign/dev` (MIT-licensed), with an
 //! optional feature flag to enable a dev-time FFI cross-check harness that
 //! byte-diffs our Rust output against the reference C on every operation.
+
+#![deny(unsafe_code)]
 //!
 //! # Security status
 //!
@@ -15,7 +17,7 @@
 //!
 //! # API
 //!
-//! ```ignore
+//! ```no_run
 //! use pqe_hawk::HawkKeypair;
 //! use rand::rngs::OsRng;
 //!

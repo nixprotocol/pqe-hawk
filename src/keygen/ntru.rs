@@ -416,7 +416,8 @@ pub fn solve_ntru_intermediate(
     let ft_start = llen * n;
     let gt_start = ft_start + slen * n;
     let fd_start = gt_start + slen * n;
-    let t1_start = fd_start + dlen * hn;
+    // Note: t1 region only becomes live later (after Fd is consumed); its
+    // starting offset is set at the `t1_start = fd_start` binding below.
 
     // Step 2a: move fgt -> ft (copy_within handles overlapping forward copy).
     tmp.copy_within(fgt_start..fgt_start + 2 * n * slen, ft_start);

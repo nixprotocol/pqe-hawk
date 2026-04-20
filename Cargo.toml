@@ -37,6 +37,27 @@ slow-tests = []
 cc = { version = "1", optional = true }
 bindgen = { version = "0.69", optional = true }
 
+# Lints: the crate is a byte-exact port of reference C, so a few cosmetic
+# lints are suppressed where the "violation" deliberately mirrors the C
+# source layout (explicit parens around shift-index expressions for
+# operator-precedence clarity; `x + 0` identity ops preserved to keep the
+# line-by-line correspondence with the reference). All genuinely useful
+# clippy/rustc checks stay enabled.
+[lints.rust]
+unsafe_code = "deny"
+unused_parens = "allow"
+
+[lints.clippy]
+# Preserved-from-C-porting cosmetics:
+identity_op = "allow"
+needless_range_loop = "allow"
+# Methods named after their C counterparts (mp_add, mp_sub, ...) shadow std
+# trait names; this is intentional and the types don't implement those traits.
+should_implement_trait = "allow"
+# C functions take many parameters (e.g. mp_mp31_sig: 8 args); refactoring
+# to structs would obscure the byte-exact correspondence with the reference.
+too_many_arguments = "allow"
+
 [profile.release]
 opt-level = 3
 lto = "fat"
