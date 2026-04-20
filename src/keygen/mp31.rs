@@ -90,7 +90,7 @@ pub fn mp_half(a: u32, p: u32) -> u32 {
 #[inline]
 pub fn mp_montymul(a: u32, b: u32, p: u32, p0i: u32) -> u32 {
     let z = (a as u64).wrapping_mul(b as u64);
-    let w = ((z as u32).wrapping_mul(p0i)) as u32;
+    let w = (z as u32).wrapping_mul(p0i);
     let d = (z.wrapping_add((w as u64).wrapping_mul(p as u64)) >> 32) as u32;
     d.wrapping_sub(p)
         .wrapping_add(p & tbmask(d.wrapping_sub(p)))

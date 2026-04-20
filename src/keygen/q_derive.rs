@@ -41,6 +41,12 @@ pub struct MakeQ001Output {
 /// `lim00`, `lim01`, `lim11` are `1 << bits_lim{00,01,11}[logn]`.
 ///
 /// Port of `make_q001` (ng_hawk.c:274-423).
+///
+/// Returns `Result<_, ()>` because the reference C returns a bare int flag
+/// with no error detail; the sole caller (`hawk_keygen`) interprets `Err`
+/// as "retry with a fresh (f, g)" and carries no payload that a richer
+/// error type would expose.
+#[allow(clippy::result_unit_err)]
 pub fn make_q001(
     logn: u32,
     lim00: i32,
@@ -231,7 +237,7 @@ pub fn make_q001(
             let xq01 = mp_norm(t2[u], p);
             let xq11 = mp_norm(t3[u], p);
             if u == 0 {
-                if xq00 < -32768 || xq00 > 32767 {
+                if !(-32768..=32767).contains(&xq00) {
                     return Err(());
                 }
             } else {

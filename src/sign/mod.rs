@@ -196,7 +196,7 @@ fn sign_512<R: RngCore>(
             let z = z.wrapping_add(h1_bit);
             // Arithmetic right-shift by 1: y = z >> 1 (signed).
             let y = (z as i32) >> 1;
-            if y < -LIM || y >= LIM {
+            if !(-LIM..LIM).contains(&y) {
                 in_bounds = false;
                 break;
             }

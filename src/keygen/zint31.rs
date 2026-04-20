@@ -157,7 +157,7 @@ pub fn zint_rebuild_crt(
                 let xp = xx[kk + v + uu];
                 let xq = zint_mod_small_unsigned(&xx[kk + v..], u, n, p, p0i, r2);
                 let xr = mp_montymul(s, mp_sub(xp, xq, p), p, p0i);
-                zint_add_mul_small(&mut xx[kk + v..], u, n, &tmp[..u].to_vec(), xr);
+                zint_add_mul_small(&mut xx[kk + v..], u, n, &tmp[..u], xr);
             }
             kk += n * xlen;
         }

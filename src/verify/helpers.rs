@@ -12,7 +12,7 @@ pub fn make_t1(logn: u32, d: &mut [i16], h1: &[u8]) {
     for u in (0..n).step_by(8) {
         let mut h1b = h1[u >> 3] as u32;
         for v in 0..8 {
-            let x = d[u + v] as i16 as i32 as u32;
+            let x = d[u + v] as i32 as u32;
             let new_x = (h1b & 1).wrapping_sub(x << 1);
             d[u + v] = new_x as i32 as i16;
             h1b >>= 1;
