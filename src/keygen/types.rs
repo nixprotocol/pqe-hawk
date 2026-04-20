@@ -172,6 +172,59 @@ impl HawkSecretKey {
     pub fn to_bytes(&self) -> [u8; crate::params::HAWK_SECRET_KEY_BYTES] {
         crate::serialize::encode_private(&self.seed, &self.f_cap, &self.g_cap, &self.hpub)
     }
+
+    /// Deserialize a secret key from its 184-byte wire format.
+    ///
+    /// Reconstructs the in-memory representation:
+    /// - `(f, g)` are regenerated from the 24-byte `kgseed` via
+    ///   `Hawk_regen_fg` (identical to the keygen derivation).
+    /// - `(F, G)` are lifted from the stored `F_mod2 / G_mod2` bitmasks into
+    ///   `Vec<i8>` so that their low bits match the mod-2 bytes. The signing
+    ///   path only consumes `F_cap & 1` and `G_cap & 1` (via
+    ///   `serialize::extract_lowbit`), so a 0/1 lift is sufficient for
+    ///   signing; full-precision `F, G` are not needed post-keygen.
+    /// - `hpub` is copied verbatim.
+    ///
+    /// Decoding is infallible on a well-sized input: the 184-byte layout is
+    /// fixed, every field has a known position, and no validation is
+    /// performed on the kgseed or the mod-2 bits (both are free-form bitmasks
+    /// in the HAWK encoding).
+    pub fn from_bytes(bytes: &[u8; crate::params::HAWK_SECRET_KEY_BYTES]) -> Self {
+        let (seed, f_mod2, g_mod2, hpub_vec) = crate::serialize::decode_private(bytes);
+
+        let mut f = vec![0i8; crate::params::HAWK_N];
+        let mut g = vec![0i8; crate::params::HAWK_N];
+        crate::keygen::regen_fg::hawk_regen_fg(&mut f, &mut g, &seed);
+
+        let f_cap = lift_mod2_bits(&f_mod2);
+        let g_cap = lift_mod2_bits(&g_mod2);
+
+        let mut hpub = [0u8; 32];
+        hpub.copy_from_slice(&hpub_vec);
+
+        HawkSecretKey {
+            f,
+            g,
+            f_cap,
+            g_cap,
+            seed,
+            hpub,
+        }
+    }
+}
+
+/// Lift a 64-byte mod-2 bitmask (one bit per coefficient, packed 8-per-byte,
+/// low-bit-first) back into a 512-element `Vec<i8>` whose `x & 1` matches
+/// the original bit. Inverse of `serialize::extract_lowbit`.
+fn lift_mod2_bits(packed: &[u8]) -> Vec<i8> {
+    debug_assert_eq!(packed.len(), crate::params::HAWK_N / 8);
+    let mut out = vec![0i8; crate::params::HAWK_N];
+    for (u, &byte) in packed.iter().enumerate() {
+        for i in 0..8 {
+            out[u * 8 + i] = ((byte >> i) & 1) as i8;
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -289,5 +342,54 @@ mod tests {
         let kp3 = HawkKeypair::generate(&mut rng3);
         assert!(bool::from(kp1.public.ct_eq(&kp2.public)));
         assert!(!bool::from(kp1.public.ct_eq(&kp3.public)));
+    }
+
+    #[test]
+    fn secret_from_bytes_roundtrip_fields() {
+        let mut rng = ChaCha20Rng::from_seed([13u8; 32]);
+        let kp = HawkKeypair::generate(&mut rng);
+        let bytes = kp.secret.to_bytes();
+        let sk2 = HawkSecretKey::from_bytes(&bytes);
+        assert_eq!(sk2.seed, kp.secret.seed);
+        assert_eq!(sk2.hpub, kp.secret.hpub);
+        assert_eq!(sk2.f, kp.secret.f);
+        assert_eq!(sk2.g, kp.secret.g);
+        for i in 0..crate::params::HAWK_N {
+            assert_eq!(
+                sk2.f_cap[i] & 1,
+                kp.secret.f_cap[i] & 1,
+                "F low-bit mismatch at {i}"
+            );
+            assert_eq!(
+                sk2.g_cap[i] & 1,
+                kp.secret.g_cap[i] & 1,
+                "G low-bit mismatch at {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn secret_from_bytes_produces_usable_signing_key() {
+        let mut rng = ChaCha20Rng::from_seed([21u8; 32]);
+        let kp = HawkKeypair::generate(&mut rng);
+        let bytes = kp.secret.to_bytes();
+        let sk2 = HawkSecretKey::from_bytes(&bytes);
+
+        let msg = b"restored-key signing test";
+        let mut sig_rng = ChaCha20Rng::from_seed([22u8; 32]);
+        let sig = sk2.sign(msg, &mut sig_rng).expect("restored sk must sign");
+        // The associated public key (unchanged across serialize/deserialize)
+        // must accept the signature.
+        assert!(kp.public.verify(msg, &sig).is_ok());
+    }
+
+    #[test]
+    fn secret_to_bytes_roundtrip_is_idempotent() {
+        let mut rng = ChaCha20Rng::from_seed([33u8; 32]);
+        let kp = HawkKeypair::generate(&mut rng);
+        let bytes1 = kp.secret.to_bytes();
+        let sk2 = HawkSecretKey::from_bytes(&bytes1);
+        let bytes2 = sk2.to_bytes();
+        assert_eq!(bytes1, bytes2);
     }
 }
