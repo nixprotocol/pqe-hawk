@@ -66,6 +66,14 @@ fn sign_512<R: RngCore>(
     const LIM: i32 = 1 << 9; // 512 — per-coefficient bound for s1
 
     // Step 1: compute hm = SHAKE256(msg || hpub) → 64 bytes.
+    //
+    // Note: hm is NOT wrapped in `Zeroizing`. It is derived entirely from
+    // public inputs — `msg` is chosen by the caller, and `hpub` is
+    // `SHAKE256(encoded_public_key)[..32]` which is a function of the
+    // public key alone. Zeroizing it would be defense-theatre, not
+    // defense-in-depth. The same reasoning applies to `salt` (public by
+    // construction; part of the output signature) and `h0, h1`
+    // (SHAKE256(hm || salt) — both inputs public).
     let hm: [u8; 64] = crate::hash::compute_hm(msg, &secret.hpub);
 
     // Step 2: extract F2 = low bits of f_cap, G2 = low bits of g_cap (n/8
