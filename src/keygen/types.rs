@@ -21,6 +21,29 @@ pub struct HawkPublicKey {
 }
 
 impl HawkPublicKey {
+    /// Compact identifier for this public key: the first 8 bytes of
+    /// `SHA3-256` over its [`HawkPublicKey::to_bytes`] encoding.
+    ///
+    /// Intended for human-readable fingerprints in CLI tooling and logs
+    /// (e.g. "pubkey fingerprint: 3a7b9c…"). It is a non-cryptographic
+    /// identifier; callers that need collision resistance should hash the
+    /// full public key themselves.
+    ///
+    /// `to_bytes()` can in principle fail on Golomb-Rice overflow, but the
+    /// keygen retry loop in [`HawkKeypair::generate`] guarantees that any
+    /// `HawkPublicKey` reachable as a typed value encodes successfully —
+    /// so the inner `.expect` is sound.
+    pub fn fingerprint(&self) -> [u8; 8] {
+        use sha3::{Digest, Sha3_256};
+        let bytes = self
+            .to_bytes()
+            .expect("HawkPublicKey::to_bytes invariant (keygen ensures encodable)");
+        let digest = Sha3_256::digest(bytes);
+        let mut out = [0u8; 8];
+        out.copy_from_slice(&digest[..8]);
+        out
+    }
+
     /// Constant-time comparison of two public keys.
     ///
     /// Useful when comparing against an expected pinned value — avoids
@@ -226,6 +249,77 @@ impl HawkSecretKey {
             hpub,
         }
     }
+
+    /// Recover the matching [`HawkPublicKey`] from this secret key.
+    ///
+    /// Re-runs the keygen-time NTRU solve on `(self.f, self.g)` to recover
+    /// the full-precision `(F, G)` and then calls `make_q001` to derive
+    /// the public Q-polynomials `(q00, q01)`. This is intentionally
+    /// independent of `self.f_cap` / `self.g_cap`, which after
+    /// [`HawkSecretKey::from_bytes`] only carry mod-2 bits — full precision
+    /// is needed for `make_q001`, so the NTRU solver is the authoritative
+    /// path regardless of how the secret key was constructed.
+    ///
+    /// The derivation is deterministic: `(f, g)` uniquely determines
+    /// `(F, G)` up to sign, which in turn uniquely determines `(q00, q01)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::HawkError::MalformedSecretKey`] if the embedded `(f, g)`
+    /// do not admit an NTRU solution. A well-formed `HawkSecretKey`
+    /// (produced by [`HawkKeypair::generate`] or round-tripped through
+    /// [`HawkSecretKey::to_bytes`] / [`HawkSecretKey::from_bytes`]) never
+    /// hits this branch.
+    pub fn derive_public(&self) -> Result<HawkPublicKey, crate::error::HawkError> {
+        use crate::keygen::ntru::solve_ntru;
+        use crate::keygen::ntru_profile::{SOLVE_HAWK_512, SOLVE_OK};
+        use crate::keygen::q_derive::{make_q001, BITS_LIM00, BITS_LIM01, BITS_LIM11};
+
+        const LOGN: u32 = crate::params::HAWK_LOGN as u32;
+        const N: usize = crate::params::HAWK_N;
+        let lim00 = 1i32 << BITS_LIM00[LOGN as usize];
+        let lim01 = 1i32 << BITS_LIM01[LOGN as usize];
+        let lim11 = 1i32 << BITS_LIM11[LOGN as usize];
+
+        // Step 1: re-solve NTRU from (f, g) to recover full-precision (F, G).
+        // Matches step 7 of `hawk_keygen_512`.
+        let mut tmp = vec![0u32; 20 * N];
+        let err = solve_ntru(&SOLVE_HAWK_512, LOGN, &self.f, &self.g, &mut tmp);
+        if err != SOLVE_OK {
+            return Err(crate::error::HawkError::MalformedSecretKey(format!(
+                "NTRU re-solve failed (err={err})"
+            )));
+        }
+
+        // Step 2: unpack (F, G) from tmp, mirroring step 8 of hawk_keygen_512.
+        let mut f_cap = vec![0i8; N];
+        let mut g_cap = vec![0i8; N];
+        for u in 0..N {
+            let b = (tmp[u / 4] >> ((u % 4) * 8)) as u8;
+            f_cap[u] = b as i8;
+        }
+        for u in 0..N {
+            let idx = N + u;
+            let b = (tmp[idx / 4] >> ((idx % 4) * 8)) as u8;
+            g_cap[u] = b as i8;
+        }
+
+        // Step 3: derive Q-polynomials, mirroring step 9 of hawk_keygen_512.
+        let mut q_tmp = vec![0u32; 20 * N];
+        let q_out = make_q001(
+            LOGN, lim00, lim01, lim11, &self.f, &self.g, &f_cap, &g_cap, &mut q_tmp,
+        )
+        .map_err(|()| {
+            crate::error::HawkError::MalformedSecretKey(
+                "Q-polynomial derivation failed".to_string(),
+            )
+        })?;
+
+        Ok(HawkPublicKey {
+            q00: q_out.q00,
+            q01: q_out.q01,
+        })
+    }
 }
 
 /// Lift a 64-byte mod-2 bitmask (one bit per coefficient, packed 8-per-byte,
@@ -421,5 +515,66 @@ mod tests {
         let sk2 = HawkSecretKey::from_bytes(&bytes1);
         let bytes2 = sk2.to_bytes();
         assert_eq!(bytes1, bytes2);
+    }
+
+    #[test]
+    fn derive_public_matches_generate_output() {
+        let mut rng = ChaCha20Rng::from_seed([42u8; 32]);
+        let kp = HawkKeypair::generate(&mut rng);
+        let recovered = kp.secret.derive_public().expect("derive must succeed");
+        assert_eq!(recovered, kp.public);
+    }
+
+    #[test]
+    fn derive_public_survives_secret_roundtrip() {
+        let mut rng = ChaCha20Rng::from_seed([55u8; 32]);
+        let kp = HawkKeypair::generate(&mut rng);
+        let bytes = kp.secret.to_bytes();
+        let sk2 = HawkSecretKey::from_bytes(&bytes);
+        let recovered = sk2.derive_public().expect("derive must succeed after roundtrip");
+        assert_eq!(recovered, kp.public);
+    }
+
+    #[test]
+    fn fingerprint_is_stable_and_8_bytes() {
+        let mut rng = ChaCha20Rng::from_seed([101u8; 32]);
+        let kp = HawkKeypair::generate(&mut rng);
+        let a = kp.public.fingerprint();
+        let b = kp.public.fingerprint();
+        assert_eq!(a.len(), 8);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn fingerprint_matches_sha3_prefix() {
+        use sha3::{Digest, Sha3_256};
+        let mut rng = ChaCha20Rng::from_seed([102u8; 32]);
+        let kp = HawkKeypair::generate(&mut rng);
+        let pk_bytes = kp.public.to_bytes().expect("encode");
+        let digest = Sha3_256::digest(pk_bytes);
+        let mut expected = [0u8; 8];
+        expected.copy_from_slice(&digest[..8]);
+        assert_eq!(kp.public.fingerprint(), expected);
+    }
+
+    #[test]
+    fn fingerprint_differs_across_keys() {
+        let mut rng1 = ChaCha20Rng::from_seed([103u8; 32]);
+        let mut rng2 = ChaCha20Rng::from_seed([104u8; 32]);
+        let kp1 = HawkKeypair::generate(&mut rng1);
+        let kp2 = HawkKeypair::generate(&mut rng2);
+        assert_ne!(kp1.public.fingerprint(), kp2.public.fingerprint());
+    }
+
+    #[test]
+    fn derived_public_signs_and_verifies() {
+        let mut rng = ChaCha20Rng::from_seed([66u8; 32]);
+        let kp = HawkKeypair::generate(&mut rng);
+        let recovered = kp.secret.derive_public().unwrap();
+
+        let msg = b"derive_public end-to-end";
+        let mut sig_rng = ChaCha20Rng::from_seed([67u8; 32]);
+        let sig = kp.secret.sign(msg, &mut sig_rng).unwrap();
+        recovered.verify(msg, &sig).expect("derived pubkey must verify");
     }
 }
