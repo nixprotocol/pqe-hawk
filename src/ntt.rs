@@ -1,4 +1,4 @@
-//! Number-Theoretic Transform over Z_q[X]/(X^n+1).
+//! Number-Theoretic Transform over `Z_q[X]/(X^n+1)`.
 //!
 //! Port of `Zq(NTT)` and `Zq(iNTT)` from c-reference/hawk-512/modq.h
 //! (specialized for Q=18433). The reference operates on the "Montgomery [1..q]"

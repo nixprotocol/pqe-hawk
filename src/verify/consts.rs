@@ -24,11 +24,11 @@ pub const P2_R3: u32 = 976758995;
 /// 16*2^32 mod P2.
 pub const P2_M16: u32 = 3014624;
 
-/// bits_lim01[logn] — max bit size of q01 coefficients (excluding sign bit).
+/// `bits_lim01[logn]` — max bit size of q01 coefficients (excluding sign bit).
 pub const BITS_LIM01: [i8; 11] = [0, 0, 0, 0, 0, 0, 0, 0, 11, 12, 14];
-/// bits_lims0[logn] — limit for s0 reconstruction.
+/// `bits_lims0[logn]` — limit for s0 reconstruction.
 pub const BITS_LIMS0: [i8; 11] = [0, 0, 0, 0, 0, 0, 0, 0, 12, 13, 14];
-/// bits_lims1[logn] — limit for s1 (same as q00 encoding lim + 4).
+/// `bits_lims1[logn]` — limit for s1 (same as q00 encoding lim + 4).
 pub const BITS_LIMS1: [i8; 11] = [0, 0, 0, 0, 0, 0, 0, 0, 9, 9, 10];
 
 /// Maximum tnorm for HAWK-512 verify. (sigma_ver^2)*8*n^2.

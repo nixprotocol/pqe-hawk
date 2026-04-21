@@ -1,4 +1,4 @@
-//! Fixed-point complex FFT over Q[X]/(X^n+1) used by the NTRU solver.
+//! Fixed-point complex FFT over `Q[X]/(X^n+1)` used by the NTRU solver.
 //!
 //! Port of c-reference/hawk-512/ng_fxp.c. The FFT operates on polynomials
 //! whose coefficients are fxr (Q32.32) values; the FFT representation stores

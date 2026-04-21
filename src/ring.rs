@@ -1,4 +1,4 @@
-//! Polynomials over Z_q[X]/(X^n+1) where n=HAWK_N, q=HAWK_Q.
+//! Polynomials over `Z_q[X]/(X^n+1)` where n=HAWK_N, q=HAWK_Q.
 //!
 //! This is HAWK's ring — NOT the Frog ring used by pqe-ring. Do not reuse.
 //! Reference: `c-reference/hawk-512/ng_inner.h` — `mp_add` / `mp_sub`
@@ -6,8 +6,8 @@
 
 use crate::params::{HAWK_N, HAWK_Q};
 
-/// A polynomial in Z_q[X]/(X^n+1) with coefficients stored little-endian
-/// (coefficient at index i is the coefficient of X^i).
+/// A polynomial in `Z_q[X]/(X^n+1)` with coefficients stored little-endian
+/// (coefficient at index `i` is the coefficient of `X^i`).
 ///
 /// Coefficients are stored reduced mod q in [0, q).
 #[derive(Clone, Debug, PartialEq, Eq)]

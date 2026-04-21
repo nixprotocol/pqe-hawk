@@ -11,7 +11,7 @@ use crate::keygen::mp31::{mp_add, mp_intt, mp_mkgm, mp_mkigm, mp_montymul, mp_no
 use crate::keygen::poly::poly_mp_set_small;
 use crate::keygen::primes::PRIMES;
 
-/// Maximum bit-size of q00 coefficients (excluding q00[0]).
+/// Maximum bit-size of q00 coefficients (excluding `q00[0]`).
 /// Port of `bits_lim00` (ng_hawk.c:242-244).
 pub const BITS_LIM00: [i8; 11] = [0, 0, 0, 0, 0, 0, 0, 0, 9, 9, 10];
 
@@ -19,7 +19,7 @@ pub const BITS_LIM00: [i8; 11] = [0, 0, 0, 0, 0, 0, 0, 0, 9, 9, 10];
 /// Port of `bits_lim01` (ng_hawk.c:245-247).
 pub const BITS_LIM01: [i8; 11] = [0, 0, 0, 0, 0, 0, 0, 0, 11, 12, 14];
 
-/// Maximum bit-size of q11 coefficients (excluding q11[0]).
+/// Maximum bit-size of q11 coefficients (excluding `q11[0]`).
 /// Port of `bits_lim11` (ng_hawk.c:248-250).
 pub const BITS_LIM11: [i8; 11] = [0, 0, 0, 0, 0, 0, 0, 0, 13, 15, 17];
 

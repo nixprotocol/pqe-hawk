@@ -12,7 +12,7 @@
 
 /// Twiddle-factor table for the NTT modulo P1 (2147473409).
 ///
-/// GM_P1[i] = (2^32) * g^rev(i) mod P1, where g is the primitive
+/// `GM_P1[i]` = `(2^32) * g^rev(i) mod P1`, where g is the primitive
 /// 2048-th root of unity and rev() is bit-reversal over 10 bits.
 ///
 /// Port of `GM_p1[]` (hawk_vrfy.c:268-440).
@@ -193,7 +193,7 @@ pub const GM_P1: [u32; 1024] = [
 
 /// Twiddle-factor table for the NTT modulo P2 (2147389441).
 ///
-/// GM_P2[i] = (2^32) * g^rev(i) mod P2, where g is the primitive
+/// `GM_P2[i]` = `(2^32) * g^rev(i) mod P2`, where g is the primitive
 /// 2048-th root of unity and rev() is bit-reversal over 10 bits.
 ///
 /// Port of `GM_p2[]` (hawk_vrfy.c:442-613).

@@ -1,4 +1,4 @@
-//! GF(2)[X]/(X^n+1) polynomial arithmetic for HAWK-512 signing.
+//! `GF(2)[X]/(X^n+1)` polynomial arithmetic for HAWK-512 signing.
 //!
 //! Port of the `bp_*` helpers from c-reference/hawk-512/hawk_sign.c:25-295.
 //! These implement carryless (GF(2)) polynomial multiplication via Karatsuba
@@ -10,7 +10,7 @@
 //!   bp_muladd_256 : 96 bytes  (2 * 256/8 + scratch_for_muladd_128 = 64 + 32)
 //!   bp_muladd_512 : 224 bytes (2 * 512/8 + scratch_for_muladd_256 = 128 + 96)
 //!   bp_mulmod_512 : 160 bytes (512/8 + scratch_for_muladd_256 = 64 + 96)
-//!   basis_m2_mul  : 224 bytes (64 [w1] + 160 [w2 for bp_mulmod_512])
+//!   basis_m2_mul  : 224 bytes (64 `[w1]` + 160 `[w2 for bp_mulmod_512]`)
 
 // ---------------------------------------------------------------------------
 // XOR helpers (port of bp_xor_N macros from hawk_sign.c:71-149)
@@ -346,8 +346,8 @@ pub(crate) fn bp_muladd_512(d: &mut [u8], a: &[u8], b: &[u8], tmp: &mut [u8]) {
 //   d[32..64] ^= t1[0..32]
 // ---------------------------------------------------------------------------
 
-/// Multiplication in GF(2)[X]/(X^512+1).
-/// `d` = `a`×`b` mod X^512+1.
+/// Multiplication in `GF(2)[X]/(X^512+1)`.
+/// `d` = `a`×`b` mod `X^512+1`.
 /// All three are 64-byte arrays (512 bits); `tmp` ≥ 160 bytes scratch.
 pub fn bp_mulmod_512(d: &mut [u8], a: &[u8], b: &[u8], tmp: &mut [u8]) {
     // n=512, hn=256 → N8=64, HN8=32

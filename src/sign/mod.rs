@@ -68,17 +68,21 @@ fn sign_512<R: RngCore>(
     // Step 1: compute hm = SHAKE256(msg || hpub) → 64 bytes.
     let hm: [u8; 64] = crate::hash::compute_hm(msg, &secret.hpub);
 
-    // Step 2: extract F2 = low bits of f_cap, G2 = low bits of g_cap (n/8 bytes each).
-    let mut f_cap2 = [0u8; N8];
-    let mut g_cap2 = [0u8; N8];
-    crate::serialize::extract_lowbit(&secret.f_cap, &mut f_cap2);
-    crate::serialize::extract_lowbit(&secret.g_cap, &mut g_cap2);
+    // Step 2: extract F2 = low bits of f_cap, G2 = low bits of g_cap (n/8
+    // bytes each). These 64-byte masks are the `mod 2` fingerprint of the
+    // secret key's capital-F, capital-G polynomials; treat them as secret and
+    // wrap in Zeroizing so the stack buffers are cleared on scope exit.
+    let mut f_cap2 = zeroize::Zeroizing::new([0u8; N8]);
+    let mut g_cap2 = zeroize::Zeroizing::new([0u8; N8]);
+    crate::serialize::extract_lowbit(&secret.f_cap, &mut *f_cap2);
+    crate::serialize::extract_lowbit(&secret.g_cap, &mut *g_cap2);
 
-    // Step 3: extract f2, g2 (low bits of f, g).
-    let mut f2 = [0u8; N8];
-    let mut g2 = [0u8; N8];
-    crate::serialize::extract_lowbit(&secret.f, &mut f2);
-    crate::serialize::extract_lowbit(&secret.g, &mut g2);
+    // Step 3: extract f2, g2 (low bits of f, g). Same secret-fingerprint
+    // treatment — zeroize on drop.
+    let mut f2 = zeroize::Zeroizing::new([0u8; N8]);
+    let mut g2 = zeroize::Zeroizing::new([0u8; N8]);
+    crate::serialize::extract_lowbit(&secret.f, &mut *f2);
+    crate::serialize::extract_lowbit(&secret.g, &mut *g2);
 
     // Retry loop.
     for _attempt in 0..HAWK_SAMPLER_RETRY_BUDGET {
@@ -89,28 +93,33 @@ fn sign_512<R: RngCore>(
         // 3b. h = SHAKE256(hm || salt) → (h0, h1), each N8 = 64 bytes.
         let (h0, h1) = crate::hash::compute_h(&hm, &salt);
 
-        // 3c. t = B*h mod 2 → (t0, t1), each N8 bytes.
-        let mut t0 = [0u8; N8];
-        let mut t1 = [0u8; N8];
-        let mut bp_tmp = [0u8; 224];
+        // 3c. t = B*h mod 2 → (t0, t1), each N8 bytes. (t0, t1) and the
+        // scratch buffer `bp_tmp` hold secret-derived values (linear
+        // combinations of the secret mod-2 basis with the public h vector),
+        // so zeroize on retry-loop-iteration scope exit.
+        let mut t0 = zeroize::Zeroizing::new([0u8; N8]);
+        let mut t1 = zeroize::Zeroizing::new([0u8; N8]);
+        let mut bp_tmp = zeroize::Zeroizing::new([0u8; 224]);
         basis_m2_mul(
-            &mut t0,
-            &mut t1,
+            &mut *t0,
+            &mut *t1,
             &h0,
             &h1,
-            &f2,
-            &g2,
-            &f_cap2,
-            &g_cap2,
-            &mut bp_tmp,
+            &*f2,
+            &*g2,
+            &*f_cap2,
+            &*g_cap2,
+            &mut *bp_tmp,
         );
 
         // 3d. Gaussian sample conditioned on t (pass t0 || t1 concatenated = 128 bytes).
         //     sig_gauss_alt indexes into the full 2n-bit parity vector using v = 0..2n-1.
-        let mut t_parity = [0u8; 2 * N8]; // 128 bytes
-        t_parity[..N8].copy_from_slice(&t0);
-        t_parity[N8..].copy_from_slice(&t1);
-        let gs = crate::sample::sample(rng, &t_parity);
+        //     t_parity is a re-packing of the secret-derived (t0, t1);
+        //     zeroize on scope exit.
+        let mut t_parity = zeroize::Zeroizing::new([0u8; 2 * N8]); // 128 bytes
+        t_parity[..N8].copy_from_slice(&*t0);
+        t_parity[N8..].copy_from_slice(&*t1);
+        let gs = crate::sample::sample(rng, &*t_parity);
 
         // 3e. Check squared norm. Port of hawk_sign.c:1019. Note that the
         //     norm check happens here, immediately after sampling and
