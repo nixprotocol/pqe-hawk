@@ -531,7 +531,9 @@ mod tests {
         let kp = HawkKeypair::generate(&mut rng);
         let bytes = kp.secret.to_bytes();
         let sk2 = HawkSecretKey::from_bytes(&bytes);
-        let recovered = sk2.derive_public().expect("derive must succeed after roundtrip");
+        let recovered = sk2
+            .derive_public()
+            .expect("derive must succeed after roundtrip");
         assert_eq!(recovered, kp.public);
     }
 
@@ -575,6 +577,8 @@ mod tests {
         let msg = b"derive_public end-to-end";
         let mut sig_rng = ChaCha20Rng::from_seed([67u8; 32]);
         let sig = kp.secret.sign(msg, &mut sig_rng).unwrap();
-        recovered.verify(msg, &sig).expect("derived pubkey must verify");
+        recovered
+            .verify(msg, &sig)
+            .expect("derived pubkey must verify");
     }
 }
