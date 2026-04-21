@@ -391,7 +391,6 @@ pub fn verify_inner(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::keygen::HawkKeypair;
     use rand::SeedableRng;
     use rand_chacha::ChaCha20Rng;

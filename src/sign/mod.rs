@@ -130,10 +130,16 @@ fn sign_512<R: RngCore>(
         // 3g. Compute w3 = 2*(f*x1 - g*x0) via NTT.
         //     All NTT operations work in [1, q] (Montgomery) domain.
         //
+        //     w1, w2, w3 hold NTT-domain intermediates derived from secret
+        //     (f, g). `Zeroizing` wraps them so the backing `Vec<u16>` is
+        //     zeroed when it goes out of scope (including via early `continue`
+        //     in the retry loop below), matching the treatment of the secret
+        //     key itself (`ZeroizeOnDrop`).
+        //
         //     w1 = g * x0 (NTT domain):
-        let mut w1 = vec![0u16; N];
-        let mut w2 = vec![0u16; N];
-        let mut w3 = vec![0u16; N];
+        let mut w1 = zeroize::Zeroizing::new(vec![0u16; N]);
+        let mut w2 = zeroize::Zeroizing::new(vec![0u16; N]);
+        let mut w3 = zeroize::Zeroizing::new(vec![0u16; N]);
 
         // w1 ← g (mq domain)
         mq_poly_set_small(&mut w1, &secret.g);
@@ -178,7 +184,13 @@ fn sign_512<R: RngCore>(
         // Safe conversion: read each w3[u] as a signed i16 (the u16→i16
         // numeric cast preserves the two's-complement bit pattern without
         // unsafe slice aliasing).
-        let mut s1_vec: Vec<i16> = w3.iter().map(|&v| v as i16).collect();
+        //
+        // Wrap in `Zeroizing` so a failed-bounds `continue` path below still
+        // zeroes the intermediate (it holds secret-derived values until the
+        // final normalization loop completes). The success path moves out of
+        // the wrapper into the public signature struct.
+        let mut s1_vec =
+            zeroize::Zeroizing::new(w3.iter().map(|&v| v as i16).collect::<Vec<i16>>());
         let ps = poly_symbreak(&s1_vec);
         // `~tbmask(ps - 1)` where `tbmask(x) = (x as i32 >> 31) as u32` gives
         // the table above.
@@ -207,8 +219,12 @@ fn sign_512<R: RngCore>(
             continue;
         }
 
-        // 3i. Encode signature: salt || GR(s1) → 555 bytes.
-        let sig = HawkSignature { salt, s1: s1_vec };
+        // 3i. Encode signature: salt || GR(s1) → 555 bytes. Take the inner
+        // Vec out of the Zeroizing wrapper (the signature itself is public
+        // output — no need to zeroize it). Replacing with an empty Vec
+        // leaves a zero-length buffer for Zeroizing to handle on drop.
+        let s1 = std::mem::take(&mut *s1_vec);
+        let sig = HawkSignature { salt, s1 };
 
         // Encoding always succeeds when in_bounds (the GR encoder may still
         // overflow in theory, but for HAWK-512 with LIM=512 it fits).

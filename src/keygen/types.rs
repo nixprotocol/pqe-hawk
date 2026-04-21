@@ -61,7 +61,11 @@ impl HawkPublicKey {
 /// key's backing allocations remain readable (e.g. in core dumps, swap,
 /// `/proc/*/mem`). It does **not** defend against attackers with real-time
 /// memory access, side-channel capabilities, or compromised allocators.
-#[derive(Clone, Debug, Zeroize, ZeroizeOnDrop)]
+///
+/// The [`core::fmt::Debug`] impl is deliberately redacted — it prints
+/// `HawkSecretKey { .. }` with no field contents, so logging or `dbg!`
+/// macros cannot accidentally leak key material.
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct HawkSecretKey {
     pub(crate) f: Vec<i8>,
     pub(crate) g: Vec<i8>,
@@ -74,6 +78,17 @@ pub struct HawkSecretKey {
     /// SHAKE-256 hash of the encoded public key, truncated to 32 bytes.
     /// Mixed into the signing hash (hm) during signature generation.
     pub(crate) hpub: [u8; 32],
+}
+
+impl core::fmt::Debug for HawkSecretKey {
+    /// Redacted Debug: prints the type name only, never the key bytes.
+    ///
+    /// `#[derive(Debug)]` would expose the full polynomial coefficients and
+    /// kgseed via `{:?}` formatting, which is a trivial way for application
+    /// code to leak secrets into logs, error messages, or trace output.
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("HawkSecretKey").finish_non_exhaustive()
+    }
 }
 
 /// A HAWK-512 keypair.
@@ -342,6 +357,21 @@ mod tests {
         let kp3 = HawkKeypair::generate(&mut rng3);
         assert!(bool::from(kp1.public.ct_eq(&kp2.public)));
         assert!(!bool::from(kp1.public.ct_eq(&kp3.public)));
+    }
+
+    #[test]
+    fn secret_debug_is_redacted() {
+        let mut rng = ChaCha20Rng::from_seed([123u8; 32]);
+        let kp = HawkKeypair::generate(&mut rng);
+        let formatted = format!("{:?}", kp.secret);
+        // Must not leak any field content.
+        assert!(!formatted.contains("seed:"), "{formatted}");
+        assert!(!formatted.contains("hpub:"), "{formatted}");
+        assert!(!formatted.contains(" f:"), "{formatted}");
+        assert!(!formatted.contains(" g:"), "{formatted}");
+        assert!(!formatted.contains("f_cap"), "{formatted}");
+        // Must still be identifiable as a HawkSecretKey.
+        assert!(formatted.contains("HawkSecretKey"), "{formatted}");
     }
 
     #[test]
