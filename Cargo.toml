@@ -57,6 +57,14 @@ should_implement_trait = "allow"
 # C functions take many parameters (e.g. mp_mp31_sig: 8 args); refactoring
 # to structs would obscure the byte-exact correspondence with the reference.
 too_many_arguments = "allow"
+# Defensive constant-size asserts in unit tests (e.g. `assert!(HAWK_N > 0)`)
+# are idiomatic compile-time-const sanity checks; clippy's warning that they
+# will be optimized out is the point.
+assertions_on_constants = "allow"
+# `c >= -4 && c <= 4` stylistically matches the bounds comment `[-4, 4]`
+# and reads more naturally than `(-4..=4).contains(&c)` in the regen_fg
+# popcount-in-range assertion contexts.
+manual_range_contains = "allow"
 
 [profile.release]
 opt-level = 3
