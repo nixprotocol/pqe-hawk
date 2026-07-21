@@ -15,6 +15,8 @@ Pure-Rust port of the [HAWK](https://hawk-sign.info/) post-quantum signature sch
 
 **Not audited.** Do not use to secure live funds, production authentication, or any setting where a compromise has material consequences. See SECURITY.md for the full posture.
 
+**Upgrading from 0.1.0:** 0.1.1 fixes a weak-key BUFF break at verify and a signing path that could return an unserializable signature. Both are drop-in, with no API change. See CHANGELOG.md.
+
 ## Usage
 
 ```rust

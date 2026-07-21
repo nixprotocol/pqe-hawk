@@ -60,6 +60,24 @@ fn sign_512<R: RngCore>(
     msg: &[u8],
     rng: &mut R,
 ) -> Result<HawkSignature, HawkError> {
+    // Production path: no-op hook (see `sign_512_hooked`).
+    sign_512_hooked(secret, msg, rng, &mut |_attempt, _s1| {})
+}
+
+/// `sign_512` with a test seam.
+///
+/// `s1_hook` is invoked once per retry-loop iteration, immediately before the
+/// encode step, with the attempt index and a mutable `s1`. Production passes a
+/// no-op, so this is byte-for-byte identical to the un-hooked path (pinned by
+/// `hooked_signing_with_noop_equals_production`). Tests use it to force the
+/// rare encode-overflow path deterministically and verify the loop recovers by
+/// resigning.
+fn sign_512_hooked<R: RngCore>(
+    secret: &HawkSecretKey,
+    msg: &[u8],
+    rng: &mut R,
+    s1_hook: &mut dyn FnMut(usize, &mut Vec<i16>),
+) -> Result<HawkSignature, HawkError> {
     const N: usize = HAWK_N; // 512
     const N8: usize = N / 8; // 64 — bytes per packed bit-vector
     const MAX_XNORM: u32 = 8317; // HAWK-512: 2*n*(sigma_ver^2) bound
@@ -93,7 +111,7 @@ fn sign_512<R: RngCore>(
     crate::serialize::extract_lowbit(&secret.g, &mut *g2);
 
     // Retry loop.
-    for _attempt in 0..HAWK_SAMPLER_RETRY_BUDGET {
+    for attempt in 0..HAWK_SAMPLER_RETRY_BUDGET {
         // 3a. Generate 24-byte salt from rng directly (use_shake=0 path).
         let mut salt = [0u8; HAWK_SALT_BYTES];
         rng.fill_bytes(&mut salt);
@@ -240,17 +258,42 @@ fn sign_512<R: RngCore>(
         // Vec out of the Zeroizing wrapper (the signature itself is public
         // output — no need to zeroize it). Replacing with an empty Vec
         // leaves a zero-length buffer for Zeroizing to handle on drop.
-        let s1 = std::mem::take(&mut *s1_vec);
-        let sig = HawkSignature { salt, s1 };
-
-        // Encoding always succeeds when in_bounds (the GR encoder may still
-        // overflow in theory, but for HAWK-512 with LIM=512 it fits).
-        return Ok(sig);
+        //
+        // The per-coefficient bound (3h) does NOT guarantee the Golomb-Rice
+        // encoding fits the fixed 555-byte buffer: its variable section grows
+        // with sum(|s1[i]| >> 5), which can overflow even when every
+        // coefficient is in-bounds. If it overflows, resign with a fresh salt
+        // rather than return a signature that cannot be serialized. This
+        // matches the reference C, which restarts on encode failure
+        // (hawk_sign.c:1142-1158).
+        let mut s1 = std::mem::take(&mut *s1_vec);
+        // Test seam: production passes a no-op (see `sign_512`). Tests use it to
+        // force `s1` to an overflowing value on a chosen attempt, exercising the
+        // resign path below.
+        s1_hook(attempt, &mut s1);
+        match try_encode_attempt(salt, s1) {
+            Some(sig) => return Ok(sig),
+            None => continue,
+        }
     }
 
     Err(HawkError::SamplingFailure {
         retries: HAWK_SAMPLER_RETRY_BUDGET,
     })
+}
+
+/// Build a `HawkSignature` from `(salt, s1)` only if it serializes into the
+/// fixed 555-byte wire format. Returns `None` on Golomb-Rice buffer overflow,
+/// signalling the signing loop to resign with a fresh salt (port of the
+/// `encode_sig` failure path in hawk_sign.c:1142-1158).
+///
+/// Separated from `sign_512` so the encode-or-resign decision is unit-testable
+/// with crafted `s1` values without driving the full sampler.
+fn try_encode_attempt(salt: [u8; HAWK_SALT_BYTES], s1: Vec<i16>) -> Option<HawkSignature> {
+    let sig = HawkSignature { salt, s1 };
+    // `to_bytes` overflow is the only expected error here; treat any encode
+    // failure as "does not fit, resign".
+    sig.to_bytes().ok().map(|_| sig)
 }
 
 impl HawkSecretKey {
@@ -435,5 +478,173 @@ mod tests {
         bytes[HAWK_SIGNATURE_BYTES - 1] ^= 0x01;
         let r = HawkSignature::from_bytes(&bytes);
         assert!(r.is_err());
+    }
+
+    // --- resign-on-encode-overflow (regression guard) ---
+    //
+    // The Golomb-Rice signature encoder writes a fixed 555-byte buffer. Its
+    // variable section grows with sum(|s1[i]| >> 5), so a signature can be
+    // in-bounds per-coefficient (|s1[i]| < LIM = 512) yet still overflow in
+    // aggregate. `sign_512` must NOT return such a signature; it must resign.
+    // The encode-or-resign decision is `try_encode_attempt`.
+
+    /// An s1 that is in-bounds per-coefficient but overflows the buffer in
+    /// aggregate. From the empirical boundary, sum(|c|>>5) > ~664 overflows;
+    /// 50 coefficients at 511 give sum = 50*15 = 750, comfortably over. Every
+    /// coefficient is < LIM (512), so the signing bounds check would pass it.
+    fn overflowing_s1() -> Vec<i16> {
+        let mut s1 = vec![0i16; HAWK_N];
+        for s in s1.iter_mut().take(50) {
+            *s = 511;
+        }
+        s1
+    }
+
+    #[test]
+    fn try_encode_attempt_returns_none_on_aggregate_overflow() {
+        let salt = [0u8; HAWK_SALT_BYTES];
+        let s1 = overflowing_s1();
+        // Every coefficient is within the per-coefficient signing bound...
+        assert!(s1.iter().all(|&c| (-512..512).contains(&(c as i32))));
+        // ...yet the encoding overflows, so the attempt must be rejected.
+        assert!(
+            try_encode_attempt(salt, s1).is_none(),
+            "an s1 that overflows the 555-byte buffer must not yield a signature"
+        );
+    }
+
+    #[test]
+    fn try_encode_attempt_returns_some_for_encodable_s1() {
+        let salt = [9u8; HAWK_SALT_BYTES];
+        let s1: Vec<i16> = (0..HAWK_N).map(|i| ((i as i32 % 7) - 3) as i16).collect();
+        let sig = try_encode_attempt(salt, s1.clone())
+            .expect("an in-budget s1 must encode to a signature");
+        assert_eq!(sig.salt, salt);
+        assert_eq!(sig.s1, s1);
+        // And the returned signature is guaranteed serializable.
+        assert!(sig.to_bytes().is_ok());
+    }
+
+    #[test]
+    fn signed_signatures_always_serialize() {
+        use crate::keygen::HawkKeypair;
+        use rand::SeedableRng;
+        use rand_chacha::ChaCha20Rng;
+
+        // The invariant the bug violated: every signature `sign` returns must
+        // serialize. Drive many signings; assert each output round-trips.
+        // NOTE: overflow is ~1-in-thousands, so these signings almost certainly
+        // never hit the resign path. This guards the invariant but does NOT
+        // exercise the retry; `sign_recovers_from_forced_encode_overflow` does.
+        let mut rng = ChaCha20Rng::from_seed([5u8; 32]);
+        let kp = HawkKeypair::generate(&mut rng);
+        for i in 0..200u32 {
+            let msg = format!("msg-{i}");
+            let sig = kp
+                .secret
+                .sign(msg.as_bytes(), &mut rng)
+                .expect("signing within budget");
+            assert!(
+                sig.to_bytes().is_ok(),
+                "sign returned a signature that fails to serialize (msg {i})"
+            );
+        }
+    }
+
+    // --- integration: the loop actually RECOVERS from an overflow ---
+    //
+    // The tests above prove `try_encode_attempt` rejects a bad s1, but not that
+    // `sign_512` responds to that rejection by looping and ultimately returning
+    // a VALID signature. Overflow is too rare to hit by chance, so we use the
+    // `s1_hook` seam to force the first attempt's s1 to overflow, then assert
+    // the loop resigns and yields a serializable signature.
+
+    /// Drive `sign_512_hooked` while forcing the first attempt's s1 to a value
+    /// that overflows the wire buffer, so the loop is made to traverse the
+    /// overflow -> resign -> success path deterministically.
+    #[test]
+    fn sign_recovers_from_forced_encode_overflow() {
+        use crate::keygen::HawkKeypair;
+        use rand::SeedableRng;
+        use rand_chacha::ChaCha20Rng;
+        use std::cell::Cell;
+
+        let mut rng = ChaCha20Rng::from_seed([11u8; 32]);
+        let kp = HawkKeypair::generate(&mut rng);
+
+        let attempts = Cell::new(0usize);
+        let sig = sign_512_hooked(&kp.secret, b"recover", &mut rng, &mut |attempt, s1| {
+            attempts.set(attempt + 1);
+            // On the FIRST attempt only, clobber s1 so it overflows on encode.
+            // Later attempts are left untouched so the real sampler output is
+            // used and the loop can succeed.
+            if attempt == 0 {
+                for s in s1.iter_mut().take(50) {
+                    *s = 511;
+                }
+            }
+        })
+        .expect("signing must recover by resigning, not error out");
+
+        // The loop must have resigned at least once (the forced first attempt
+        // overflowed, so a real second attempt was required).
+        assert!(
+            attempts.get() >= 2,
+            "expected a resign (>=2 attempts), got {}",
+            attempts.get()
+        );
+        // The recovered signature must be valid and serializable.
+        assert!(
+            sig.to_bytes().is_ok(),
+            "recovered signature must serialize to 555 bytes"
+        );
+        // And it must verify against the public key (a real signature, not junk).
+        assert!(
+            kp.public.verify(b"recover", &sig).is_ok(),
+            "recovered signature must verify"
+        );
+    }
+
+    /// The unmodified loop (no-op hook) must equal the production `sign` path
+    /// byte-for-byte, proving the seam changes nothing in production.
+    #[test]
+    fn hooked_signing_with_noop_equals_production() {
+        use crate::keygen::HawkKeypair;
+        use rand::SeedableRng;
+        use rand_chacha::ChaCha20Rng;
+
+        let mut kgen = ChaCha20Rng::from_seed([21u8; 32]);
+        let kp = HawkKeypair::generate(&mut kgen);
+
+        let mut rng_a = ChaCha20Rng::from_seed([22u8; 32]);
+        let mut rng_b = ChaCha20Rng::from_seed([22u8; 32]);
+        let via_prod = kp.secret.sign(b"same", &mut rng_a).unwrap();
+        let via_hook = sign_512_hooked(&kp.secret, b"same", &mut rng_b, &mut |_, _| {}).unwrap();
+        assert_eq!(via_prod.to_bytes().unwrap(), via_hook.to_bytes().unwrap());
+    }
+
+    /// Encoder overflow boundary: pin the threshold so a future encoder change
+    /// that shifts it is caught. sum(|c|>>5) must be < the budget to fit.
+    #[test]
+    fn encode_overflow_boundary() {
+        let salt = [0u8; HAWK_SALT_BYTES];
+        // k coefficients at 511 contribute k*(511>>5) = k*15 to the unary sum.
+        // From the empirical boundary the crossover is between 42 and 45.
+        let mk = |k: usize| {
+            let mut s1 = vec![0i16; HAWK_N];
+            for s in s1.iter_mut().take(k) {
+                *s = 511;
+            }
+            s1
+        };
+        // 42*15 = 630 fits; 45*15 = 675 overflows.
+        assert!(
+            crate::serialize::encode_signature(&salt, &mk(42)).is_ok(),
+            "sum=630 must fit the 555-byte buffer"
+        );
+        assert!(
+            crate::serialize::encode_signature(&salt, &mk(45)).is_err(),
+            "sum=675 must overflow the 555-byte buffer"
+        );
     }
 }

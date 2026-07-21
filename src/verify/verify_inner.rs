@@ -5,8 +5,8 @@
 use crate::error::HawkError;
 use crate::keygen::mp31::{mp_add, mp_montymul};
 use crate::verify::consts::{
-    BITS_LIM01, BITS_LIMS0, BITS_LIMS1, HAWK_512_MAX_TNORM, P1, P1_0I, P1_M16, P1_R3, P2, P2_0I,
-    P2_M16, P2_R3,
+    BITS_LIM01, BITS_LIMS0, BITS_LIMS1, HAWK_512_MAX_TNORM, HAWK_512_Q00_FLOOR, P1, P1_0I, P1_M16,
+    P1_R3, P2, P2_0I, P2_M16, P2_R3,
 };
 use crate::verify::fx32::{fx32_fft, fx32_ifft, fx32_of, fx32_rint};
 use crate::verify::helpers::make_t1;
@@ -122,7 +122,13 @@ pub fn verify_inner(
     //
     // Port of hawk_vrfy.c:1785-1806.
     // -------------------------------------------------------------------------
-    if q00[0] < 0 {
+    // KeyNormCheck (Dao, eprint 2026/1298): q00[0] = ||(f,g)||^2 for an
+    // auto-adjoint key. Honest keygen guarantees q00[0] >= 2080 (see
+    // HAWK_512_Q00_FLOOR); a malformed public key with a tiny q00[0] (e.g. the
+    // constant q00=1 weak keys) otherwise passes verification and breaks the
+    // BUFF properties. Rejecting below the floor also subsumes the old
+    // `q00[0] < 0` guard. No-op for honest keys.
+    if (q00[0] as i32) < HAWK_512_Q00_FLOOR {
         return Err(HawkError::InvalidSignature);
     }
     let cst_q00 = q00[0] as i32;

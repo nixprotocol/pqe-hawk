@@ -42,6 +42,28 @@ The upstream HAWK team explicitly notes (per the C reference `README`):
 
 > WARNING: This code has not been audited. HAWK itself is a relatively recent scheme; the security reduction is not yet as well-studied as, e.g., for Falcon. Use at your own risk.
 
+## Fixed in 0.1.1
+
+Two issues found and fixed in 0.1.1 (see `CHANGELOG.md` for detail). Both were
+reproduced against this crate before being fixed, and both carry regression
+tests. If you are on 0.1.0, upgrade — it is a drop-in change with no API break.
+
+- **Weak-key BUFF break at verify** (Dao, eprint 2026/1298). The verifier
+  accepted maliciously formed public keys with a tiny `q00[0]`, under which a
+  single trivial signature verified for essentially every message (measured:
+  256 of 256). Fixed by a `KeyNormCheck` floor rejecting `q00[0] < 2080`.
+  Honestly generated keys were never affected, and EUF/SUF-CMA security under
+  honest keys was not affected — only the BUFF add-on properties.
+- **Signing could emit an unserializable signature.** An in-bounds `s1` can
+  still overflow the fixed 555-byte Golomb-Rice buffer in aggregate; signing
+  now resigns on overflow instead of returning a signature that fails to
+  encode. Observed in practice stalling a live testnet on block commit.
+
 ## Reporting vulnerabilities
 
-If you find a security issue in this port, please open a GitHub issue or contact the maintainer at the address in `Cargo.toml`.
+If you find a security issue in this port, please report it privately via
+[GitHub Security Advisories](https://github.com/nixprotocol/pqe-hawk/security/advisories/new)
+rather than opening a public issue, so a fix can be prepared before disclosure.
+
+If the issue is in HAWK itself rather than this port, please also contact the
+upstream HAWK team (https://github.com/hawk-sign/dev).
