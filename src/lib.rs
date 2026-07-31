@@ -1,6 +1,6 @@
 //! HAWK-512 post-quantum signature scheme, pure Rust port.
 //!
-//! Implements the HAWK signature scheme (eprint 2022/1155) at the NIST Level I
+//! Implements the HAWK signature scheme (eprint 2022/1155) at the HAWK-512
 //! parameter set (n=512). This crate is a pure Rust port of the reference
 //! implementation at `github.com/hawk-sign/dev` (MIT-licensed), with an
 //! optional feature flag to enable a dev-time FFI cross-check harness that
@@ -10,10 +10,20 @@
 //!
 //! # Security status
 //!
-//! **POC-grade only.** This implementation has not been audited. The upstream
-//! HAWK authors explicitly note "no security review yet — use at own risk."
-//! See `SECURITY.md` for details. Constant-time posture is best-effort; no
-//! formal side-channel analysis has been performed.
+//! **🚫 DO NOT USE IN PRODUCTION.**
+//!
+//! **SCHEME BROKEN — research/reference only.** HAWK was withdrawn from NIST
+//! standardization on 2026-07-29 after the key-recovery attack of Strážnickas &
+//! Weis (*"HAWK-n Key Recovery Reduces to SVP in Dimension n/2+1"*), which the
+//! HAWK team confirmed approximately halves the lattice-reduction block size
+//! needed to recover an equivalent secret key. For HAWK-512 this lowers key
+//! recovery to ~2^108 gates, below its claimed NIST Level I security. The attack
+//! is structural (public key = Gram matrix `B*B`, `det B = 1`) and cannot be
+//! mitigated in this port. **Do not deploy.**
+//!
+//! This implementation is also unaudited, and its constant-time posture is
+//! best-effort with no formal side-channel analysis. See `SECURITY.md` for
+//! details.
 //!
 //! # API
 //!

@@ -1,16 +1,31 @@
 # Security policy for pqe-hawk
 
-## Current status: testnet-ready, not audited
+## Current status: SCHEME BROKEN — research/reference only
 
-This crate is a faithful Rust port of the upstream HAWK reference C implementation (github.com/hawk-sign/dev@1b9fef5, MIT licensed). It is **testnet-ready** — suitable for non-custodial testnet use where a failure has no monetary impact — but has **not** been audited for production deployment.
+### 🚫 DO NOT USE IN PRODUCTION — the HAWK scheme is cryptographically broken.
 
-The upstream HAWK scheme itself has not yet received full security review (see upstream notes: "no security review yet — use at own risk").
+> **HAWK was withdrawn from NIST standardization on 2026-07-29.** The HAWK design
+> team (Léo Ducas et al.) withdrew HAWK from NIST's additional-signature
+> standardization process following the key-recovery attack of Strážnickas & Weis
+> (Anthropic), *"HAWK-n Key Recovery Reduces to SVP in Dimension n/2+1."* The team
+> confirmed the attack **approximately halves the lattice-reduction block size**
+> required to recover an equivalent secret key, and stated that naïve
+> countermeasures (doubling parameters, higher-rank modules) make HAWK
+> uncompetitive.
 
-**Do not use this crate to secure live funds, production authentication, or any setting where a compromise has material consequences, without performing your own security analysis first.**
+This crate is a faithful Rust port of the upstream HAWK reference C implementation (github.com/hawk-sign/dev@1b9fef5, MIT licensed). The port is byte-exact against that reference, but **the scheme it implements is cryptographically broken.** Earlier releases described this crate as "testnet-ready"; that framing is retracted — the crate is now suitable only for research, reproducibility, and reference.
 
-## Hardening posture
+**Do not use this crate to secure live funds, production authentication, or any setting where a compromise has material consequences.**
 
-Testnet-readiness has been reached via the following measures:
+### The break, concretely
+
+- **What it is.** A public, deterministic, polynomial-time reduction: HAWK-*n* key recovery reduces to one exact-SVP call in dimension *n*/2+1 (vs. the designers' assumed ≈dimension *n*). It reads only the public key and exploits the scheme's structure — `det B = 1` and public key = Gram matrix `B*B`.
+- **Impact on HAWK-512** (this crate's only parameter set): key-recovery cost drops from the designers' claimed ≈2¹⁵⁰ gates to **≤2¹⁰⁸ gates** (AGPS20 model). **HAWK-512 no longer meets its claimed NIST Level I security.** HAWK-256 has been recovered end-to-end in practice.
+- **Why the port cannot fix it.** The attack targets the scheme's mathematics, not any implementation detail. Nothing in this port (sampler, encoding, zeroization, constant-time work below) affects it; a byte-exact port faithfully reproduces the vulnerability. It does not transfer to Falcon, and is evaded only by odd-prime-power conductors — not a change available within HAWK's parameter sets.
+
+## Implementation hardening posture
+
+The measures below concern the *implementation* only. They do not — and cannot — address the scheme-level break described above; they are documented because the port's fidelity and implementation hygiene remain useful for research and reference:
 
 - **Secret key zeroization.** `HawkSecretKey` derives `zeroize::ZeroizeOnDrop`, so its `f, g, F, G, seed` fields are zeroed when dropped. Verified by an explicit unit test.
 - **Constant-time public-key equality.** `HawkPublicKey::ct_eq` uses `subtle::ConstantTimeEq` to avoid early-exit byte-by-byte comparison.
@@ -38,9 +53,14 @@ However:
 
 ## Upstream caveats
 
-The upstream HAWK team explicitly notes (per the C reference `README`):
+As of 2026-07-29 the upstream HAWK team has **withdrawn HAWK from NIST
+standardization** (see the status section above). Their pre-existing warning, per
+the C reference `README`, was already:
 
 > WARNING: This code has not been audited. HAWK itself is a relatively recent scheme; the security reduction is not yet as well-studied as, e.g., for Falcon. Use at your own risk.
+
+That warning is now superseded by the confirmed key-recovery break, not merely an
+absence of review.
 
 ## Fixed in 0.1.1
 

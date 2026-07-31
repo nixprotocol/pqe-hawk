@@ -5,6 +5,31 @@ All notable changes to this crate are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Security
+
+- **HAWK withdrawn from NIST standardization (2026-07-29); the scheme is
+  broken.** The HAWK design team (Léo Ducas et al.) withdrew HAWK from NIST's
+  additional-signature standardization process following the key-recovery attack
+  of Strážnickas & Weis (Anthropic), *"HAWK-n Key Recovery Reduces to SVP in
+  Dimension n/2+1."* The attack gives a public, deterministic, polynomial-time
+  reduction from HAWK-*n* key recovery to one exact-SVP call in dimension
+  *n*/2+1, approximately halving the lattice-reduction block size versus the
+  designers' assumption. For HAWK-512 it lowers key recovery from a claimed
+  ≈2^150 gates to ≤2^108 gates (AGPS20 model), so **HAWK-512 no longer meets its
+  claimed NIST Level I security**; HAWK-256 has been recovered end-to-end. The
+  attack reads only the public key and exploits the scheme's structure
+  (`det B = 1`, public key = Gram matrix `B*B`), so it **cannot** be mitigated in
+  this port — a byte-exact port faithfully reproduces the vulnerability.
+
+### Changed
+
+- Documentation retracts the prior "testnet-ready" / "NIST Level I" framing
+  across `README.md`, `SECURITY.md`, `Cargo.toml`, and the `src/lib.rs` crate
+  header: this crate is now **research/reference only**. No code behavior
+  changed — keygen, sign, and verify remain byte-exact against the reference C.
+
 ## 0.1.1 - 2026-07-21
 
 Two correctness fixes. No API changes, so this is a drop-in upgrade from 0.1.0.
