@@ -31,4 +31,24 @@ impl HawkPublicKey {
         let pub_bytes = self.to_bytes()?;
         verify_inner::verify_inner(msg, &pub_bytes, &self.q00, &self.q01, &sig.salt, &sig.s1)
     }
+
+    /// Diagnostic verify: same accept/reject decision as [`Self::verify`], but
+    /// on failure returns the specific [`verify_inner::VerifyReject`] label
+    /// naming which check rejected. Doc-hidden, for fault-injection tests
+    /// (`tests/fault_survey.rs`) only. Because [`Self::verify`] and this method
+    /// both delegate to the same [`verify_inner::verify_inner_labeled`], the
+    /// label is exactly the check the production verifier hit.
+    #[doc(hidden)]
+    pub fn verify_labeled(
+        &self,
+        msg: &[u8],
+        sig: &HawkSignature,
+    ) -> Result<(), verify_inner::VerifyReject> {
+        let pub_bytes = self
+            .to_bytes()
+            .expect("public key encodable (keygen invariant)");
+        verify_inner::verify_inner_labeled(
+            msg, &pub_bytes, &self.q00, &self.q01, &sig.salt, &sig.s1,
+        )
+    }
 }

@@ -43,6 +43,20 @@ impl HawkSignature {
     pub fn from_bytes(bytes: &[u8; HAWK_SIGNATURE_BYTES]) -> Result<Self, HawkError> {
         crate::serialize::decode_signature(bytes)
     }
+
+    /// The 24-byte salt. Doc-hidden accessor for fault-injection tests
+    /// (`tests/fault_survey.rs`) that need to recompute `h1` from public data.
+    #[doc(hidden)]
+    pub fn salt(&self) -> &[u8; HAWK_SALT_BYTES] {
+        &self.salt
+    }
+
+    /// The `s1` polynomial (n=512 coefficients). Doc-hidden accessor for
+    /// fault-injection tests that inspect / mutate the signature polynomial.
+    #[doc(hidden)]
+    pub fn s1(&self) -> &[i16] {
+        &self.s1
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -294,6 +308,219 @@ fn try_encode_attempt(salt: [u8; HAWK_SALT_BYTES], s1: Vec<i16>) -> Option<HawkS
     // `to_bytes` overflow is the only expected error here; treat any encode
     // failure as "does not fit, resign".
     sig.to_bytes().ok().map(|_| sig)
+}
+
+// ---------------------------------------------------------------------------
+// Fault-injection test seam (doc-hidden, test-only).
+//
+// This is NOT part of the stable API and is not exercised by production
+// signing. It exists so `tests/fault_survey.rs` can drive the *real* signing
+// inner loop (identical internals to `sign_512_hooked`) while injecting a
+// fault into the Gaussian sample `x` and/or the derived `s1`, then hand the
+// resulting signature to the *real* verifier.
+//
+// It differs from `sign_512` in exactly two ways, both required to model a
+// fault faithfully:
+//   1. It performs a SINGLE signing attempt (no rejection-restart loop). A
+//      fault that lowers the norm or corrupts a coefficient must not be
+//      silently "recovered" by resampling — we want to observe what the one
+//      faulted attempt produces.
+//   2. It surfaces the intermediate gates (norm-reject, per-coeff-bound,
+//      encode-overflow) as data in `FaultSeamOutcome` rather than looping.
+//
+// With no-op hooks it reproduces production attempt-0 byte-for-byte; the test
+// pins this with an un-faulted CONTROL that must both (a) equal a production
+// `sign` on the same seed for the common no-restart case and (b) verify.
+// ---------------------------------------------------------------------------
+
+/// Result of a single faulted (or control) signing attempt via
+/// [`sign_512_fault_seam`].
+#[doc(hidden)]
+#[derive(Clone, Debug)]
+pub struct FaultSeamOutcome {
+    /// The 24-byte salt used for this attempt.
+    pub salt: [u8; HAWK_SALT_BYTES],
+    /// Squared norm of the (possibly faulted) Gaussian `x`, as seen by the
+    /// signing norm-check gate.
+    pub squared_norm: u32,
+    /// `true` if the norm-check gate (`squared_norm > MAX_XNORM`) would have
+    /// rejected/restarted this attempt.
+    pub norm_rejected: bool,
+    /// The derived `s1` (post sym-break, post per-coefficient normalisation).
+    /// Present iff `s1_in_bounds` is true.
+    pub s1: Option<Vec<i16>>,
+    /// `true` if every derived `s1` coefficient was within the signing bound
+    /// `[-LIM, LIM)`.
+    pub s1_in_bounds: bool,
+    /// A `HawkSignature { salt, s1 }` built from the derived s1 (iff in
+    /// bounds). This is the object to feed to the verifier. Note: it may not
+    /// serialize (see `encodes`), but the verifier consumes the in-memory
+    /// `s1`, not the wire bytes, so it can still be verified.
+    pub signature: Option<HawkSignature>,
+    /// `true` if `signature` serializes to the fixed 555-byte wire format.
+    pub encodes: bool,
+}
+
+/// Drive ONE real signing attempt with fault hooks. See module note above.
+///
+/// * `x_hook(attempt, x, squared_norm)` fires immediately after Gaussian
+///   sampling and BEFORE the norm-check gate. Mutating `x` models a sampler
+///   fault; the hook must also update `squared_norm` to whatever the faulted
+///   `x` implies (or leave it, to model a fault the norm-check does not catch).
+/// * `s1_hook(attempt, s1)` fires immediately before encoding, exactly like
+///   the production `sign_512_hooked` seam.
+///
+/// `attempt` is always 0 (single attempt). Returns the outcome, or the same
+/// `SamplingFailure` the production loop would on an internal impossibility.
+///
+/// `skip_symbreak`: when `true`, the conditional-negation sym-break step is
+/// omitted (the raw w3-derived sign is kept). This models a fault that skips
+/// the sym-break enforcement entirely, as opposed to forcing it wrong.
+#[doc(hidden)]
+pub fn sign_512_fault_seam<R: RngCore>(
+    secret: &HawkSecretKey,
+    msg: &[u8],
+    rng: &mut R,
+    skip_symbreak: bool,
+    x_hook: &mut dyn FnMut(usize, &mut [i8], &mut u32),
+    s1_hook: &mut dyn FnMut(usize, &mut Vec<i16>),
+) -> Result<FaultSeamOutcome, HawkError> {
+    const N: usize = HAWK_N;
+    const N8: usize = N / 8;
+    const MAX_XNORM: u32 = 8317;
+    const LIM: i32 = 1 << 9;
+
+    let hm: [u8; 64] = crate::hash::compute_hm(msg, &secret.hpub);
+
+    let mut f_cap2 = zeroize::Zeroizing::new([0u8; N8]);
+    let mut g_cap2 = zeroize::Zeroizing::new([0u8; N8]);
+    crate::serialize::extract_lowbit(&secret.f_cap, &mut *f_cap2);
+    crate::serialize::extract_lowbit(&secret.g_cap, &mut *g_cap2);
+
+    let mut f2 = zeroize::Zeroizing::new([0u8; N8]);
+    let mut g2 = zeroize::Zeroizing::new([0u8; N8]);
+    crate::serialize::extract_lowbit(&secret.f, &mut *f2);
+    crate::serialize::extract_lowbit(&secret.g, &mut *g2);
+
+    let attempt = 0usize;
+
+    // 3a. Salt.
+    let mut salt = [0u8; HAWK_SALT_BYTES];
+    rng.fill_bytes(&mut salt);
+
+    // 3b. h = SHAKE256(hm || salt).
+    let (h0, h1) = crate::hash::compute_h(&hm, &salt);
+
+    // 3c. t = B*h mod 2.
+    let mut t0 = zeroize::Zeroizing::new([0u8; N8]);
+    let mut t1 = zeroize::Zeroizing::new([0u8; N8]);
+    let mut bp_tmp = zeroize::Zeroizing::new([0u8; 224]);
+    basis_m2_mul(
+        &mut *t0, &mut *t1, &h0, &h1, &*f2, &*g2, &*f_cap2, &*g_cap2, &mut *bp_tmp,
+    );
+
+    // 3d. Gaussian sample conditioned on t.
+    let mut t_parity = zeroize::Zeroizing::new([0u8; 2 * N8]);
+    t_parity[..N8].copy_from_slice(&*t0);
+    t_parity[N8..].copy_from_slice(&*t1);
+    let gs = crate::sample::sample(rng, &*t_parity);
+
+    // Copy the sampled x into a mutable buffer and let the fault hook mutate
+    // it. The hook owns the norm bookkeeping.
+    let mut x_buf: Vec<i8> = gs.x.to_vec();
+    let mut squared_norm = gs.squared_norm;
+    x_hook(attempt, &mut x_buf, &mut squared_norm);
+
+    // 3e. Norm-check gate (report, but do not restart — single attempt).
+    let norm_rejected = squared_norm > MAX_XNORM;
+
+    // 3f/3g. Compute w3 = 2*(f*x1 - g*x0) via NTT on the (possibly faulted) x.
+    let x0 = &x_buf[..N];
+    let x1 = &x_buf[N..];
+
+    let mut w1 = zeroize::Zeroizing::new(vec![0u16; N]);
+    let mut w2 = zeroize::Zeroizing::new(vec![0u16; N]);
+    let mut w3 = zeroize::Zeroizing::new(vec![0u16; N]);
+
+    mq_poly_set_small(&mut w1, &secret.g);
+    mq_poly_set_small(&mut w2, x0);
+    mq_ntt(HAWK_LOGN, &mut w1);
+    mq_ntt(HAWK_LOGN, &mut w2);
+    for u in 0..N {
+        w1[u] = mq_montymul(w1[u] as u32, w2[u] as u32) as u16;
+    }
+
+    mq_poly_set_small(&mut w3, &secret.f);
+    mq_poly_set_small(&mut w2, x1);
+    mq_ntt(HAWK_LOGN, &mut w3);
+    mq_ntt(HAWK_LOGN, &mut w2);
+    for u in 0..N {
+        w3[u] = mq_tomonty(mq_sub(
+            mq_montymul(w2[u] as u32, w3[u] as u32),
+            w1[u] as u32,
+        )) as u16;
+    }
+    mq_intt(HAWK_LOGN, &mut w3);
+    mq_poly_snorm(&mut w3);
+
+    // 3h. Sym-break + s1 recovery (identical to production).
+    let mut s1_vec =
+        zeroize::Zeroizing::new(w3.iter().map(|&v| v as i16).collect::<Vec<i16>>());
+    let ps = poly_symbreak(&s1_vec);
+    // Production sets `nm` from `ps` so that a first-nonzero-positive w3 is
+    // negated. `skip_symbreak` forces `nm = 0` (never negate), modelling a
+    // fault where the sym-break enforcement is simply omitted.
+    let nm: u32 = if skip_symbreak {
+        0
+    } else {
+        !((((ps as u32).wrapping_sub(1)) as i32 >> 31) as u32)
+    };
+
+    let mut in_bounds = true;
+    for u in 0..N {
+        let z = s1_vec[u] as i32 as u32;
+        let z = (z ^ nm).wrapping_sub(nm);
+        let h1_bit = ((h1[u >> 3] >> (u & 7)) & 1) as u32;
+        let z = z.wrapping_add(h1_bit);
+        let y = (z as i32) >> 1;
+        if !(-LIM..LIM).contains(&y) {
+            in_bounds = false;
+            break;
+        }
+        s1_vec[u] = y as i16;
+    }
+
+    if !in_bounds {
+        return Ok(FaultSeamOutcome {
+            salt,
+            squared_norm,
+            norm_rejected,
+            s1: None,
+            s1_in_bounds: false,
+            signature: None,
+            encodes: false,
+        });
+    }
+
+    // 3i. Apply the s1 fault hook, then build the signature (no restart).
+    let mut s1 = std::mem::take(&mut *s1_vec);
+    s1_hook(attempt, &mut s1);
+
+    let sig = HawkSignature {
+        salt,
+        s1: s1.clone(),
+    };
+    let encodes = sig.to_bytes().is_ok();
+
+    Ok(FaultSeamOutcome {
+        salt,
+        squared_norm,
+        norm_rejected,
+        s1: Some(s1),
+        s1_in_bounds: true,
+        signature: Some(sig),
+        encodes,
+    })
 }
 
 impl HawkSecretKey {

@@ -21,6 +21,40 @@ fn tbmask(x: u32) -> u32 {
     (x as i32 >> 31) as u32
 }
 
+/// Which verification check rejected a signature.
+///
+/// Diagnostic-only (doc-hidden). The public [`verify_inner`] collapses every
+/// variant into an opaque [`HawkError::InvalidSignature`] — leaking *which*
+/// check failed at the API boundary would aid malleability attacks. This enum
+/// exists so fault-injection tests (`tests/fault_survey.rs`) can attribute a
+/// rejection to a specific check WITHOUT changing the production contract:
+/// [`verify_inner`] is implemented by calling [`verify_inner_labeled`] and
+/// discarding the label, so the label reported is genuinely the check the real
+/// verifier hit (single source of truth), not a parallel partial model.
+///
+/// Each variant names the exact `verify_inner.rs` line of the rejecting check.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VerifyReject {
+    /// Sym-break: first non-zero coefficient of t1 = h1 - 2*s1 is negative.
+    /// verify_inner.rs, the `(csb & w) >> 31 != 0` gate.
+    SymBreakFirstNonzeroNegative,
+    /// Sym-break: t1 is entirely zero (`csb != 0` after the loop).
+    SymBreakT1AllZero,
+    /// KeyNormCheck: q00[0] < HAWK_512_Q00_FLOOR (Dao BUFF fix).
+    KeyNormCheckQ00Floor,
+    /// Complex-division domain gate: w00 out of (0, 2^30) or quotient overflow.
+    DivisionDomain,
+    /// s0 reconstruction out of range: |round(...)| >= 2^BITS_LIMS0.
+    S0OutOfRange,
+    /// Dual-prime norm accumulators disagree mod P1 vs P2 (=> tnorm too large).
+    TnormPrimeDisagree,
+    /// Final: n*sqnorm_Q(t) not divisible by 2^(logn-1)=hn.
+    TnormNotDivisibleByHn,
+    /// Final bound: (tnorm >> (logn-1)) > max_tnorm (8317 for HAWK-512).
+    TnormExceedsBound,
+}
+
 /// Inner verification function.
 ///
 /// Inputs:
@@ -36,6 +70,11 @@ fn tbmask(x: u32) -> u32 {
 /// `Err(HawkError::InvalidSignature)` if verification fails at any check.
 ///
 /// Port of `Zh(verify_inner)` (hawk_vrfy.c:1585-2154).
+///
+/// This is the production entry point. It delegates to
+/// [`verify_inner_labeled`] (the single implementation) and collapses any
+/// [`VerifyReject`] label into the opaque [`HawkError::InvalidSignature`], so
+/// no information about *which* check failed leaks at the API boundary.
 pub fn verify_inner(
     msg: &[u8],
     pub_bytes: &[u8],
@@ -44,6 +83,25 @@ pub fn verify_inner(
     salt: &[u8],
     s1: &[i16],
 ) -> Result<(), HawkError> {
+    verify_inner_labeled(msg, pub_bytes, q00, q01, salt, s1)
+        .map_err(|_label| HawkError::InvalidSignature)
+}
+
+/// Labeled verification: identical logic to [`verify_inner`] but returns the
+/// specific [`VerifyReject`] on failure. Diagnostic-only (doc-hidden); see
+/// [`VerifyReject`]. The public verifier is a thin wrapper over this, so the
+/// two can never diverge in accept/reject behaviour.
+///
+/// Port of `Zh(verify_inner)` (hawk_vrfy.c:1585-2154).
+#[doc(hidden)]
+pub fn verify_inner_labeled(
+    msg: &[u8],
+    pub_bytes: &[u8],
+    q00: &[i16],
+    q01: &[i16],
+    salt: &[u8],
+    s1: &[i16],
+) -> Result<(), VerifyReject> {
     let logn: u32 = 9;
     let n = 512usize;
     let hn = 256usize;
@@ -105,7 +163,7 @@ pub fn verify_inner(
             ft1[u + v] = fx32_of(w as i32, sh_t1 as u32);
             // Sym-break: if first nonzero value has high bit set, reject.
             if (csb & w) >> 31 != 0 {
-                return Err(HawkError::InvalidSignature);
+                return Err(VerifyReject::SymBreakFirstNonzeroNegative);
             }
             csb &= !tbmask(w.wrapping_neg());
             hb >>= 1;
@@ -113,7 +171,7 @@ pub fn verify_inner(
     }
     if csb != 0 {
         // t1 is entirely zero — not valid.
-        return Err(HawkError::InvalidSignature);
+        return Err(VerifyReject::SymBreakT1AllZero);
     }
     fx32_fft(logn, &mut ft1);
 
@@ -129,7 +187,7 @@ pub fn verify_inner(
     // BUFF properties. Rejecting below the floor also subsumes the old
     // `q00[0] < 0` guard. No-op for honest keys.
     if (q00[0] as i32) < HAWK_512_Q00_FLOOR {
-        return Err(HawkError::InvalidSignature);
+        return Err(VerifyReject::KeyNormCheckQ00Floor);
     }
     let cst_q00 = q00[0] as i32;
 
@@ -214,7 +272,7 @@ pub fn verify_inner(
         // malformed / malicious public key or signature and must trigger
         // rejection.
         if (w00.wrapping_sub(1)) >= 0x3FFF_FFFF || x_re_hi >= w00 || x_im_hi >= w00 {
-            return Err(HawkError::InvalidSignature);
+            return Err(VerifyReject::DivisionDomain);
         }
 
         // Unsigned 64-by-32 division: (hi:lo) / w00.
@@ -251,7 +309,7 @@ pub fn verify_inner(
             // Round to nearest integer at precision sh_s0+1.
             let z = fx32_rint(w, (sh_s0 + 1) as u32);
             if z < -lim_s0 || z >= lim_s0 {
-                return Err(HawkError::InvalidSignature);
+                return Err(VerifyReject::S0OutOfRange);
             }
             // t0[u+v] = h0_bit - 2*s0   (both as i16)
             let w2 = bit.wrapping_sub((z as u32) << 1);
@@ -373,7 +431,7 @@ pub fn verify_inner(
             tnorm = nnacc;
         } else if tnorm != nnacc {
             // Values disagree mod P1 and P2 → tnorm > P2 → too large.
-            return Err(HawkError::InvalidSignature);
+            return Err(VerifyReject::TnormPrimeDisagree);
         }
     }
 
@@ -386,10 +444,10 @@ pub fn verify_inner(
     // Port of hawk_vrfy.c:2153.
     // -------------------------------------------------------------------------
     if (tnorm & ((hn as u32) - 1)) != 0 {
-        return Err(HawkError::InvalidSignature);
+        return Err(VerifyReject::TnormNotDivisibleByHn);
     }
     if (tnorm >> (logn - 1)) > max_tnorm {
-        return Err(HawkError::InvalidSignature);
+        return Err(VerifyReject::TnormExceedsBound);
     }
 
     Ok(())
