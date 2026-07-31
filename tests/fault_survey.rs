@@ -136,7 +136,40 @@ fn make_keys() -> Vec<HawkKeypair> {
 
 /// Fresh signing RNG for key index `i` (distinct from keygen RNG).
 fn sign_rng(i: usize) -> ChaCha20Rng {
-    ChaCha20Rng::from_seed([0x80 | (i as u8), 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32])
+    ChaCha20Rng::from_seed([
+        0x80 | (i as u8),
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+    ])
 }
 
 /// Verify a signature with the REAL verifier and, if it rejects, attribute the
@@ -160,7 +193,7 @@ fn real_verify(pk: &HawkPublicKey, msg: &[u8], sig: &HawkSignature) -> Result<()
 
 // A no-op x-hook / s1-hook for the seam.
 fn noop_x(_a: usize, _x: &mut [i8], _n: &mut u32) {}
-fn noop_s1(_a: usize, _s1: &mut Vec<i16>) {}
+fn noop_s1(_a: usize, _s1: &mut [i16]) {}
 
 // ===========================================================================
 // CONTROL: un-faulted seam must produce a signature the REAL verifier ACCEPTS.
@@ -234,9 +267,7 @@ fn fault1_truncate_x() {
                     // ACCEPTED faulted signature: check for structural leak.
                     let h1 = recompute_h1(&kp.public, MSG, sig.salt());
                     let (nz, mx) = t1_shape(&compute_t1(&h1, sig.s1()));
-                    leak_note = format!(
-                        " ACCEPTED key {i}: t1 has {nz}/{N} nonzero, max|t1|={mx}"
-                    );
+                    leak_note = format!(" ACCEPTED key {i}: t1 has {nz}/{N} nonzero, max|t1|={mx}");
                 }
                 Err(site) => {
                     if !sites.contains(&site) {
@@ -273,7 +304,10 @@ fn fault2a_symbreak_force_wrong() {
             .sign(MSG, &mut rng)
             .expect("baseline sign succeeds");
         // Sanity: baseline verifies.
-        assert!(kp.public.verify(MSG, &base).is_ok(), "baseline must verify (key {i})");
+        assert!(
+            kp.public.verify(MSG, &base).is_ok(),
+            "baseline must verify (key {i})"
+        );
 
         // Build the sym-break-violating s1' = h1_bit - s1.
         let h1 = recompute_h1(&kp.public, MSG, base.salt());
@@ -283,8 +317,7 @@ fn fault2a_symbreak_force_wrong() {
             s1p[u] = (bit - s1p[u] as i32) as i16;
         }
         let faulted = HawkSignature::from_bytes(
-            &pqe_hawk::serialize::encode_signature(base.salt(), &s1p)
-                .expect("s1' encodes"),
+            &pqe_hawk::serialize::encode_signature(base.salt(), &s1p).expect("s1' encodes"),
         )
         .expect("s1' decodes");
 
@@ -299,8 +332,14 @@ fn fault2a_symbreak_force_wrong() {
     }
     let rejected = NUM_KEYS - accepted;
     println!("   REAL verifier: {accepted}/{NUM_KEYS} accepted, {rejected}/{NUM_KEYS} REJECTED. sites: {sites:?}");
-    println!("   => corrected sym-break rejection rate (force-wrong): {rejected}/{NUM_KEYS} = {:.0}%", 100.0 * rejected as f64 / NUM_KEYS as f64);
-    assert_eq!(accepted, 0, "every sym-break-violating signature must be rejected");
+    println!(
+        "   => corrected sym-break rejection rate (force-wrong): {rejected}/{NUM_KEYS} = {:.0}%",
+        100.0 * rejected as f64 / NUM_KEYS as f64
+    );
+    assert_eq!(
+        accepted, 0,
+        "every sym-break-violating signature must be rejected"
+    );
 }
 
 // ===========================================================================
@@ -319,10 +358,44 @@ fn fault2b_symbreak_skip() {
     let mut total = 0usize;
     for (i, kp) in keys.iter().enumerate() {
         for r in 0..8u8 {
-            let mut rng = ChaCha20Rng::from_seed([0xC0 | i as u8, r, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7]);
+            let mut rng = ChaCha20Rng::from_seed([
+                0xC0 | i as u8,
+                r,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+                7,
+            ]);
             // skip_symbreak = true
-            let out = sign_512_fault_seam(&kp.secret, MSG, &mut rng, true, &mut noop_x, &mut noop_s1)
-                .expect("seam runs");
+            let out =
+                sign_512_fault_seam(&kp.secret, MSG, &mut rng, true, &mut noop_x, &mut noop_s1)
+                    .expect("seam runs");
             let sig = match out.signature {
                 Some(s) => s,
                 None => continue, // s1 out of bounds (rare) — skip
@@ -464,9 +537,7 @@ fn fault3b_single_s1_coeff_flipped() {
         let mut s1 = base.s1().to_vec();
         // Choose a nonzero coeff around the middle to avoid disturbing the
         // first-nonzero-t1 sym-break decision.
-        let idx = (N / 2..N)
-            .find(|&j| s1[j] != 0)
-            .unwrap_or(N / 2);
+        let idx = (N / 2..N).find(|&j| s1[j] != 0).unwrap_or(N / 2);
         s1[idx] = -s1[idx];
         let faulted = HawkSignature::from_bytes(
             &pqe_hawk::serialize::encode_signature(base.salt(), &s1).expect("encode"),
@@ -484,7 +555,10 @@ fn fault3b_single_s1_coeff_flipped() {
         }
     }
     println!("   REAL verifier accepted {accepted}/{NUM_KEYS}. sites: {sites:?}");
-    assert_eq!(accepted, 0, "flipping one s1 coeff unexpectedly accepted — malleability");
+    assert_eq!(
+        accepted, 0,
+        "flipping one s1 coeff unexpectedly accepted — malleability"
+    );
 }
 
 // ===========================================================================
@@ -652,7 +726,10 @@ fn fault5_skip_norm_rejection() {
     println!(
         "   5a strong: {a_overnorm}/{NUM_KEYS} over signing-bound; no-signature-formed(signer per-coeff bound)={a_no_sig}/{NUM_KEYS}; verifier-accepted={a_accepted}/{NUM_KEYS}; sites={a_sites:?}"
     );
-    assert_eq!(a_overnorm, NUM_KEYS, "5a x must exceed the signing norm bound");
+    assert_eq!(
+        a_overnorm, NUM_KEYS,
+        "5a x must exceed the signing norm bound"
+    );
     assert_eq!(a_accepted, 0, "5a: nothing may verify");
 
     // ---- 5b: mild over-norm — signature forms, verifier catches it. ----

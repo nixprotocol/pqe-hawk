@@ -66,9 +66,7 @@ fn reject_site(r: VerifyReject) -> &'static str {
         VerifyReject::TnormNotDivisibleByHn => {
             "verify_inner.rs:447 (n*sqnorm_Q not divisible by hn)"
         }
-        VerifyReject::TnormExceedsBound => {
-            "verify_inner.rs:450 ((tnorm>>8) > max_tnorm 8317)"
-        }
+        VerifyReject::TnormExceedsBound => "verify_inner.rs:450 ((tnorm>>8) > max_tnorm 8317)",
     }
 }
 
@@ -215,7 +213,8 @@ fn probe(
         let labeled = verify_inner_labeled(m, bytes, q00, q01, salt, s1);
         let labeled_ok = labeled.is_ok();
         assert_eq!(
-            real_ok, labeled_ok,
+            real_ok,
+            labeled_ok,
             "labeled/real verdict mismatch for msg {:?}: real={real_ok} labeled={labeled:?}",
             String::from_utf8_lossy(m)
         );
@@ -285,7 +284,11 @@ fn residual_case2_nonconstant_weak_keys() {
         q00[0] = 2080;
         let mut q01 = vec![0i16; HAWK_N];
         q01[0] = 1;
-        shapes.push(Shape { name: "(a) constant q00=2080, q01=1 (floor-exact constant)", q00, q01 });
+        shapes.push(Shape {
+            name: "(a) constant q00=2080, q01=1 (floor-exact constant)",
+            q00,
+            q01,
+        });
     }
     // (b) Floor DC + max alternating +-511 perturbation (concentrates spectral
     //     energy, drives some FFT bins far from the DC value).
@@ -297,7 +300,11 @@ fn residual_case2_nonconstant_weak_keys() {
         }
         let mut q01 = vec![0i16; HAWK_N];
         q01[0] = 1;
-        shapes.push(Shape { name: "(b) q00[0]=2080 + max alternating +-511 perturbation", q00, q01 });
+        shapes.push(Shape {
+            name: "(b) q00[0]=2080 + max alternating +-511 perturbation",
+            q00,
+            q01,
+        });
     }
     // (c) DC at floor + single large off-DC coeff (rank-1 spectral tilt).
     {
@@ -306,7 +313,11 @@ fn residual_case2_nonconstant_weak_keys() {
         q00[1] = 511;
         let mut q01 = vec![0i16; HAWK_N];
         q01[0] = 16;
-        shapes.push(Shape { name: "(c) q00[0]=2080, q00[1]=511 single-tilt, q01=16", q00, q01 });
+        shapes.push(Shape {
+            name: "(c) q00[0]=2080, q00[1]=511 single-tilt, q01=16",
+            q00,
+            q01,
+        });
     }
     // (d) Floor DC + degenerate q01 = max constant, trying to make q01*t1/q00
     //     round to a huge s0 for some message.
@@ -317,7 +328,11 @@ fn residual_case2_nonconstant_weak_keys() {
         for u in 0..HAWK_N {
             q01[u] = 4095;
         }
-        shapes.push(Shape { name: "(d) q00[0]=2080, q01=all 4095 (max)", q00, q01 });
+        shapes.push(Shape {
+            name: "(d) q00[0]=2080, q01=all 4095 (max)",
+            q00,
+            q01,
+        });
     }
     // (e) DC at floor + localized low-frequency bump (breaks flat spectrum).
     {
@@ -328,7 +343,11 @@ fn residual_case2_nonconstant_weak_keys() {
         }
         let mut q01 = vec![0i16; HAWK_N];
         q01[0] = 1;
-        shapes.push(Shape { name: "(e) q00[0]=2080 + localized 511 bump [1..8]", q00, q01 });
+        shapes.push(Shape {
+            name: "(e) q00[0]=2080 + localized 511 bump [1..8]",
+            q00,
+            q01,
+        });
     }
     // (f) Above-floor DC + all-negative perturbation to try to drive
     //     cstup+fq00[u] below zero (=> DivisionDomain) or near-zero (=> blowup).
@@ -340,7 +359,11 @@ fn residual_case2_nonconstant_weak_keys() {
         }
         let mut q01 = vec![0i16; HAWK_N];
         q01[0] = 1;
-        shapes.push(Shape { name: "(f) q00[0]=2100 + all -511 (drive bins toward 0)", q00, q01 });
+        shapes.push(Shape {
+            name: "(f) q00[0]=2100 + all -511 (drive bins toward 0)",
+            q00,
+            q01,
+        });
     }
 
     let (zsig, zsalt, zs1) = zero_signature();
@@ -350,11 +373,17 @@ fn residual_case2_nonconstant_weak_keys() {
         let (pk, bytes) = match materialize(&sh.q00, &sh.q01) {
             Ok(v) => v,
             Err(e) => {
-                println!("  {} -> NOT MATERIALIZABLE (encode/decode rejected): {e}", sh.name);
+                println!(
+                    "  {} -> NOT MATERIALIZABLE (encode/decode rejected): {e}",
+                    sh.name
+                );
                 continue;
             }
         };
-        assert!(sh.q00[0] as i32 >= HAWK_512_Q00_FLOOR, "test bug: shape below floor");
+        assert!(
+            sh.q00[0] as i32 >= HAWK_512_Q00_FLOOR,
+            "test bug: shape below floor"
+        );
 
         let (acc0, det0) = probe(&pk, &bytes, &sh.q00, &sh.q01, &zsig, &zsalt, &zs1, &msgs);
 
@@ -371,7 +400,11 @@ fn residual_case2_nonconstant_weak_keys() {
         }
 
         println!("  {}", sh.name);
-        println!("      zero-sig ({} msgs):  {}", msgs.len(), summarize(&det0));
+        println!(
+            "      zero-sig ({} msgs):  {}",
+            msgs.len(),
+            summarize(&det0)
+        );
         println!(
             "      small-sigs (4 sigs x {} msgs, first-sig breakdown): {}   [total accepts across all small sigs: {}]",
             msgs.len(),
@@ -390,7 +423,9 @@ fn residual_case2_nonconstant_weak_keys() {
         "SURVIVING BUFF BREAK in case 2: a floor-passing malformed key verified >= 2 pairs. \
          See stdout for the witness."
     );
-    println!("  => CASE 2 verdict: no floor-passing non-constant key produced >= 2 accepted pairs.");
+    println!(
+        "  => CASE 2 verdict: no floor-passing non-constant key produced >= 2 accepted pairs."
+    );
 }
 
 // ===========================================================================
@@ -411,7 +446,10 @@ fn residual_case1_exclusive_ownership() {
     let mut srng = ChaCha20Rng::from_seed([202u8; 32]);
     let msg = b"exclusive-ownership-target-message".to_vec();
     let sig = kp.secret.sign(&msg, &mut srng).expect("sign");
-    assert!(kp.public.verify(&msg, &sig).is_ok(), "honest sig must verify under pk_A");
+    assert!(
+        kp.public.verify(&msg, &sig).is_ok(),
+        "honest sig must verify under pk_A"
+    );
     println!(
         "  Built honest (pk_A, msg, sig): verifies under pk_A = OK. q00_A[0]={}",
         pubkey_q00_0(&kp.public)
@@ -465,7 +503,11 @@ fn residual_case1_exclusive_ownership() {
         checked += 1;
         let real_ok = pk_b.verify(&msg, &sig).is_ok();
         let labeled = verify_inner_labeled(&msg, &bytes_b, q00, q01, &salt, &s1);
-        assert_eq!(real_ok, labeled.is_ok(), "labeled/real mismatch (case1) [{name}]");
+        assert_eq!(
+            real_ok,
+            labeled.is_ok(),
+            "labeled/real mismatch (case1) [{name}]"
+        );
         match labeled {
             Ok(()) => {
                 println!("  cand [{name}]: (msg,sig) ALSO VERIFIES under pk_B  <-- exclusive-ownership break");
@@ -523,21 +565,33 @@ fn residual_case3_polyqnorm_soundness() {
             .iter()
             .map(|&x| x.saturating_mul(2).clamp(-4095, 4095))
             .collect();
-        muts.push(M { name: "(a) real q00, q01 := 2*q01 (breaks cross relation)", q00, q01 });
+        muts.push(M {
+            name: "(a) real q00, q01 := 2*q01 (breaks cross relation)",
+            q00,
+            q01,
+        });
     }
     // (b) Real q01, q00 spectrum perturbed at one coeff (>= floor still).
     {
         let mut q00 = q00_real.clone();
         q00[5] = q00[5].saturating_add(200).clamp(-511, 511);
         let q01 = q01_real.clone();
-        muts.push(M { name: "(b) q00[5]+=200 (perturbs genuine spectrum), real q01", q00, q01 });
+        muts.push(M {
+            name: "(b) q00[5]+=200 (perturbs genuine spectrum), real q01",
+            q00,
+            q01,
+        });
     }
     // (c) Real spectrum, q00[0] inflated far above floor.
     {
         let mut q00 = q00_real.clone();
         q00[0] = 20000;
         let q01 = q01_real.clone();
-        muts.push(M { name: "(c) real spectrum, q00[0]:=20000 (DC inflated)", q00, q01 });
+        muts.push(M {
+            name: "(c) real spectrum, q00[0]:=20000 (DC inflated)",
+            q00,
+            q01,
+        });
     }
     // (d) Fully synthetic hand-forged small (q00,q01) mimicking a real form.
     {
@@ -551,7 +605,11 @@ fn residual_case3_polyqnorm_soundness() {
             q01[u] = ((u as i32 % 5) - 2) as i16;
         }
         q01[0] = 1;
-        muts.push(M { name: "(d) hand-forged small (q00,q01) mimicking a real form", q00, q01 });
+        muts.push(M {
+            name: "(d) hand-forged small (q00,q01) mimicking a real form",
+            q00,
+            q01,
+        });
     }
 
     let (zsig, zsalt, zs1) = zero_signature();
@@ -565,7 +623,10 @@ fn residual_case3_polyqnorm_soundness() {
                 continue;
             }
         };
-        assert!(m.q00[0] as i32 >= HAWK_512_Q00_FLOOR, "test bug: below floor");
+        assert!(
+            m.q00[0] as i32 >= HAWK_512_Q00_FLOOR,
+            "test bug: below floor"
+        );
 
         let (acc0, det0) = probe(&pk, &bytes, &m.q00, &m.q01, &zsig, &zsalt, &zs1, &msgs);
 
@@ -578,7 +639,11 @@ fn residual_case3_polyqnorm_soundness() {
         let hon_label_mut = verify_inner_labeled(&msgs[0], &bytes, &m.q00, &m.q01, &hsalt, &hs1);
 
         println!("  {}", m.name);
-        println!("      zero-sig ({} msgs):  {}", msgs.len(), summarize(&det0));
+        println!(
+            "      zero-sig ({} msgs):  {}",
+            msgs.len(),
+            summarize(&det0)
+        );
         println!(
             "      honest sig on msg0: real-key={} mutated-key={} ({})",
             hon_ok_real,
@@ -592,7 +657,9 @@ fn residual_case3_polyqnorm_soundness() {
         let mutated_accepts = acc0 + if hon_ok_mut { 1 } else { 0 };
         if mutated_accepts >= 2 {
             any_break = true;
-            println!("      *** PolyQnorm SOUNDNESS BREAK: non-key (q00,q01) accepted >= 2 pairs ***");
+            println!(
+                "      *** PolyQnorm SOUNDNESS BREAK: non-key (q00,q01) accepted >= 2 pairs ***"
+            );
         }
     }
 
@@ -601,8 +668,10 @@ fn residual_case3_polyqnorm_soundness() {
         "SURVIVING PolyQnorm soundness break in case 3: a non-key (q00,q01) form that passes \
          the floor was accepted for >= 2 pairs. See stdout."
     );
-    println!("  => CASE 3 verdict: no fooled-norm acceptance; mutations that break the real \
-             key relationship are rejected by the dual-prime norm / bound checks.");
+    println!(
+        "  => CASE 3 verdict: no fooled-norm acceptance; mutations that break the real \
+             key relationship are rejected by the dual-prime norm / bound checks."
+    );
 }
 
 // ===========================================================================
@@ -640,7 +709,10 @@ fn residual_case2_reaches_verifier_and_minimizes_t1() {
         for u in 1..256 {
             q00[u] = if u % 2 == 0 { 511 } else { -511 };
         }
-        shapes.push(Shape { name: "alternating +-511 spectrum (q00[0]=2080)", q00 });
+        shapes.push(Shape {
+            name: "alternating +-511 spectrum (q00[0]=2080)",
+            q00,
+        });
     }
     {
         let mut q00 = vec![0i16; HAWK_N];
@@ -648,7 +720,10 @@ fn residual_case2_reaches_verifier_and_minimizes_t1() {
         for u in 1..256 {
             q00[u] = -511;
         }
-        shapes.push(Shape { name: "all -511 spectrum (q00[0]=2100, drives bins toward 0)", q00 });
+        shapes.push(Shape {
+            name: "all -511 spectrum (q00[0]=2100, drives bins toward 0)",
+            q00,
+        });
     }
     {
         // Near-cancelling: DC just above floor, big positive low bins to try to
@@ -658,7 +733,10 @@ fn residual_case2_reaches_verifier_and_minimizes_t1() {
         for u in 1..256 {
             q00[u] = 511;
         }
-        shapes.push(Shape { name: "all +511 spectrum (q00[0]=2080, max positive bins)", q00 });
+        shapes.push(Shape {
+            name: "all +511 spectrum (q00[0]=2080, max positive bins)",
+            q00,
+        });
     }
     {
         // Sparse high-frequency spike.
@@ -666,7 +744,10 @@ fn residual_case2_reaches_verifier_and_minimizes_t1() {
         q00[0] = 2080;
         q00[255] = 511;
         q00[128] = -511;
-        shapes.push(Shape { name: "sparse hi-freq spikes (q00[0]=2080)", q00 });
+        shapes.push(Shape {
+            name: "sparse hi-freq spikes (q00[0]=2080)",
+            q00,
+        });
     }
     {
         // GR-budget-safe alternating small perturbation (|q00[u]|<=31 => k=0,
@@ -676,7 +757,10 @@ fn residual_case2_reaches_verifier_and_minimizes_t1() {
         for u in 1..256 {
             q00[u] = if u % 2 == 0 { 31 } else { -31 };
         }
-        shapes.push(Shape { name: "alternating +-31 spectrum (encodable, q00[0]=2080)", q00 });
+        shapes.push(Shape {
+            name: "alternating +-31 spectrum (encodable, q00[0]=2080)",
+            q00,
+        });
     }
     {
         // GR-budget-safe all-equal small perturbation, negative (push bins down).
@@ -685,7 +769,10 @@ fn residual_case2_reaches_verifier_and_minimizes_t1() {
         for u in 1..256 {
             q00[u] = -31;
         }
-        shapes.push(Shape { name: "all -31 spectrum (encodable, q00[0]=2090)", q00 });
+        shapes.push(Shape {
+            name: "all -31 spectrum (encodable, q00[0]=2090)",
+            q00,
+        });
     }
     {
         // Low-frequency ramp within budget (a few dozen moderate coeffs).
@@ -694,7 +781,10 @@ fn residual_case2_reaches_verifier_and_minimizes_t1() {
         for u in 1..16 {
             q00[u] = 200;
         }
-        shapes.push(Shape { name: "low-freq 200-bump [1..16] (encodable, q00[0]=2080)", q00 });
+        shapes.push(Shape {
+            name: "low-freq 200-bump [1..16] (encodable, q00[0]=2080)",
+            q00,
+        });
     }
 
     let q01_small = {
@@ -718,7 +808,11 @@ fn residual_case2_reaches_verifier_and_minimizes_t1() {
         let (zsig, zsalt, zs1) = zero_signature();
         let (acc, det) = probe(&pk, &bytes, &sh.q00, &q01_small, &zsig, &zsalt, &zs1, &msgs);
         println!("  {}", sh.name);
-        println!("      zero-sig (|t1|-optimal) over {} msgs:  {}", msgs.len(), summarize(&det));
+        println!(
+            "      zero-sig (|t1|-optimal) over {} msgs:  {}",
+            msgs.len(),
+            summarize(&det)
+        );
         if acc >= 2 {
             any_break = true;
             println!("      *** SURVIVING BUFF BREAK (reached verifier) ***");
@@ -748,7 +842,11 @@ fn labeled_verifier_accepts_honest_key() {
     let labeled = verify_inner_labeled(&msg, &bytes, &q00, &q01, &salt, &s1);
     println!("honest anchor: real_ok={real_ok}, labeled={labeled:?}");
     assert!(real_ok, "honest sig must verify");
-    assert_eq!(labeled, Ok(()), "labeled verifier must ACCEPT the honest sig");
+    assert_eq!(
+        labeled,
+        Ok(()),
+        "labeled verifier must ACCEPT the honest sig"
+    );
 }
 
 // ---------------------------------------------------------------------------

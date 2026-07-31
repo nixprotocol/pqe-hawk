@@ -383,7 +383,7 @@ pub fn sign_512_fault_seam<R: RngCore>(
     rng: &mut R,
     skip_symbreak: bool,
     x_hook: &mut dyn FnMut(usize, &mut [i8], &mut u32),
-    s1_hook: &mut dyn FnMut(usize, &mut Vec<i16>),
+    s1_hook: &mut dyn FnMut(usize, &mut [i16]),
 ) -> Result<FaultSeamOutcome, HawkError> {
     const N: usize = HAWK_N;
     const N8: usize = N / 8;
@@ -416,7 +416,15 @@ pub fn sign_512_fault_seam<R: RngCore>(
     let mut t1 = zeroize::Zeroizing::new([0u8; N8]);
     let mut bp_tmp = zeroize::Zeroizing::new([0u8; 224]);
     basis_m2_mul(
-        &mut *t0, &mut *t1, &h0, &h1, &*f2, &*g2, &*f_cap2, &*g_cap2, &mut *bp_tmp,
+        &mut *t0,
+        &mut *t1,
+        &h0,
+        &h1,
+        &*f2,
+        &*g2,
+        &*f_cap2,
+        &*g_cap2,
+        &mut *bp_tmp,
     );
 
     // 3d. Gaussian sample conditioned on t.
@@ -464,8 +472,7 @@ pub fn sign_512_fault_seam<R: RngCore>(
     mq_poly_snorm(&mut w3);
 
     // 3h. Sym-break + s1 recovery (identical to production).
-    let mut s1_vec =
-        zeroize::Zeroizing::new(w3.iter().map(|&v| v as i16).collect::<Vec<i16>>());
+    let mut s1_vec = zeroize::Zeroizing::new(w3.iter().map(|&v| v as i16).collect::<Vec<i16>>());
     let ps = poly_symbreak(&s1_vec);
     // Production sets `nm` from `ps` so that a first-nonzero-positive w3 is
     // negated. `skip_symbreak` forces `nm = 0` (never negate), modelling a
@@ -504,7 +511,7 @@ pub fn sign_512_fault_seam<R: RngCore>(
 
     // 3i. Apply the s1 fault hook, then build the signature (no restart).
     let mut s1 = std::mem::take(&mut *s1_vec);
-    s1_hook(attempt, &mut s1);
+    s1_hook(attempt, &mut s1[..]);
 
     let sig = HawkSignature {
         salt,
