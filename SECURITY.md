@@ -6,7 +6,7 @@
 
 > **HAWK was withdrawn from NIST standardization on 2026-07-29.** The HAWK design
 > team (Léo Ducas et al.) withdrew HAWK from NIST's additional-signature
-> standardization process following the key-recovery attack of Strážnickas & Weis
+> standardization process following the key-recovery attack of Straznickas & Weis
 > (Anthropic), *"HAWK-n Key Recovery Reduces to SVP in Dimension n/2+1."* The team
 > confirmed the attack **approximately halves the lattice-reduction block size**
 > required to recover an equivalent secret key, and stated that naïve
@@ -19,17 +19,20 @@ This crate is a faithful Rust port of the upstream HAWK reference C implementati
 
 ### The break, concretely
 
-- **What it is.** A public, deterministic, polynomial-time reduction: HAWK-*n* key recovery reduces to one exact-SVP call in dimension *n*/2+1 (vs. the designers' assumed ≈dimension *n*). It reads only the public key and exploits the scheme's structure — `det B = 1` and public key = Gram matrix `B*B`.
-- **Impact on HAWK-512** (this crate's only parameter set): key-recovery cost drops from the designers' claimed ≈2¹⁵⁰ gates to **≤2¹⁰⁸ gates** (AGPS20 model). **HAWK-512 no longer meets its claimed NIST Level I security.** HAWK-256 has been recovered end-to-end in practice.
-- **Why the port cannot fix it.** The attack targets the scheme's mathematics, not any implementation detail. Nothing in this port (sampler, encoding, zeroization, constant-time work below) affects it; a byte-exact port faithfully reproduces the vulnerability. It does not transfer to Falcon, and is evaded only by odd-prime-power conductors — not a change available within HAWK's parameter sets.
+- **What it is.** Straznickas & Weis (Anthropic), [eprint 2026/1593](https://eprint.iacr.org/2026/1593): a public, unconditional, deterministic polynomial-time reduction from HAWK-*n* key recovery to poly(*n*) calls to an exact-SVP oracle in dimension *n*/2+1 (vs. the designers' assumed ≈dimension *n*). The lever is a **nontrivial automorphism of the key lattice** — the Galois involution τ: ζ ↦ −ζ — which is recoverable as a *shortest vector of a public rank-n lattice* (Ducas's block reduction on that near-hypercubic class); the van Gent–Pulles descent then extracts an equivalent secret key. It reads only the public key.
+- **Impact on HAWK-512** (this crate's only parameter set): key-recovery cost drops from the designers' claimed ≈2¹⁵⁰ gates to **≤2¹⁰⁸ gates** (AGPS20 model). **HAWK-512 no longer meets its claimed NIST Level I security.** HAWK-256 has been recovered end-to-end in practice, in a few hours on a single server.
+- **Why the port cannot fix it.** The attack targets the scheme's mathematics, not any implementation detail. Nothing in this port (sampler, encoding, zeroization, constant-time work below) affects it; a byte-exact port faithfully reproduces the vulnerability. It does not transfer to Falcon, and is evaded only by conductors *m* ∈ {*p*ᵏ, 2*p*ᵏ} for odd prime *p* (equivalently, cyclotomic conductors *m* > 4 with cyclic (ℤ/*m*)ˣ) — not a change available within HAWK's parameter sets.
 
 ## Implementation hardening posture
 
 The measures below concern the *implementation* only. They do not — and cannot — address the scheme-level break described above; they are documented because the port's fidelity and implementation hygiene remain useful for research and reference:
 
-- **Secret key zeroization.** `HawkSecretKey` derives `zeroize::ZeroizeOnDrop`, so its `f, g, F, G, seed` fields are zeroed when dropped. Verified by an explicit unit test.
+- **Secret key zeroization.** `HawkSecretKey` derives `zeroize::ZeroizeOnDrop`, so its `f`, `g`, `f_cap` (F), `g_cap` (G), and `seed` fields are zeroed when dropped. Verified by the explicit unit test `zeroize_on_drop_clears_secret_material`.
 - **Constant-time public-key equality.** `HawkPublicKey::ct_eq` uses `subtle::ConstantTimeEq` to avoid early-exit byte-by-byte comparison.
-- **FFI cross-check.** 51 proptests (256 cases each) validate byte-exact equivalence with the vendored C reference at every primitive: mp31 arithmetic, NTT, big-int (`zint31`), fixed-point FFT, Gaussian sampler, NTRU solver, keygen, sign, verify.
+- **Opaque verify errors.** `verify_inner` collapses every internal rejection into `HawkError::InvalidSignature`. The `VerifyReject` variants that name *which* check failed are `#[doc(hidden)]` and test-only, so the public API never reveals the failing check (which would aid malleability attacks).
+- **FFI cross-check.** 50 tests in `tests/cross_check.rs` cover every primitive — mp31 arithmetic, NTT, big-int (`zint31`), fixed-point FFT, Gaussian sampler, NTRU solver, keygen, sign, verify. 49 byte-diff against the vendored C reference (47 proptest-driven at proptest's 256-case default, a few blocks lower; plus 2 direct diffs); the 50th is a Rust-only round-trip. All are gated behind `--features cross-check-reference-c`, which builds the C reference and runs bindgen, so they do **not** run under a default `cargo test` or in CI.
+- **Fault-injection survey** (`tests/fault_survey.rs`). Drives the real signing inner loop through a doc-hidden seam and injects plausible faults — truncated noise, forced and skipped sym-break, single-coefficient flips, sign flips, skipped norm rejection — then feeds each faulted signature to the real verifier. Every model runs over 8 deterministic keys alongside an un-faulted control that must accept, proving the harness reproduces production. The suite also asserts that the opaque `verify()` and the labelled internal path never disagree on accept/reject.
+- **Residual BUFF probing** (`tests/buff_residual.rs`). The 0.1.1 `KeyNormCheck` floor closes the constant-`q00` weak-key class but does not prove full BUFF restoration. This suite probes the explicitly-open residual classes against the real verifier: S-CEO / S-DEO key substitution, non-constant weak keys that pass the floor, and PolyQnorm soundness on `(q00, q01)` pairs that are not a genuine `||(f,g)||²` form.
 - **NIST KAT pin.** The generated PQCsignKAT_HAWK-512.rsp from the reference harness is committed; case 0's 1024-byte pubkey and 184-byte secret key are asserted byte-for-byte against the Rust implementation.
 - **Fuzz targets.** Three `cargo-fuzz` harnesses (`fuzz_decode_pubkey`, `fuzz_decode_signature`, `fuzz_verify`) assert that decoders and the verify pipeline never panic on arbitrary inputs. Stable-Rust proptest mirrors run in CI.
 - **Malformed-input proptests.** Corrupting the trailing zero-padding region of a valid pubkey or signature is asserted to return `Err(HawkError::Malformed*)` with no panic. Pathological all-zeros / all-ones buffers exercise the unary tail decoder.
@@ -54,19 +57,25 @@ However:
 ## Upstream caveats
 
 As of 2026-07-29 the upstream HAWK team has **withdrawn HAWK from NIST
-standardization** (see the status section above). Their pre-existing warning, per
-the C reference `README`, was already:
+standardization** (see the status section above). Their pre-existing warning, as
+recorded verbatim in `c-reference/PROVENANCE.md` (the upstream `README` itself is
+not part of what we vendored), was already:
 
-> WARNING: This code has not been audited. HAWK itself is a relatively recent scheme; the security reduction is not yet as well-studied as, e.g., for Falcon. Use at your own risk.
+> This code was written for the on-ramp call for post-quantum signature schemes,
+> organized by NIST and currently serves research purposes. There was no
+> security review yet so use at own risk.
 
 That warning is now superseded by the confirmed key-recovery break, not merely an
 absence of review.
 
-## Fixed in 0.1.1
+## Release notes: what to run
 
-Two issues found and fixed in 0.1.1 (see `CHANGELOG.md` for detail). Both were
-reproduced against this crate before being fixed, and both carry regression
-tests. If you are on 0.1.0, upgrade — it is a drop-in change with no API break.
+**Current release: 0.1.2.** It is documentation-only — no code behaviour
+changed — so everything in this document applies to it unchanged. The latest
+*security-relevant* changes shipped in **0.1.1**: two issues found and fixed
+(see `CHANGELOG.md` for detail). Both were reproduced against this crate before
+being fixed, and both carry regression tests. If you are on 0.1.0, upgrade — it
+is a drop-in change with no API break.
 
 - **Weak-key BUFF break at verify** (Dao, eprint 2026/1298). The verifier
   accepted maliciously formed public keys with a tiny `q00[0]`, under which a
