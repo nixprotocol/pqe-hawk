@@ -8,7 +8,7 @@ Pure-Rust port of the [HAWK](https://hawk-sign.info/) post-quantum signature sch
 >
 > On 2026-07-29 the HAWK design team **withdrew HAWK from NIST's additional
 > signature standardization process.** This followed the key-recovery attack of
-> Strážnickas & Weis (Anthropic), *"HAWK-n Key Recovery Reduces to SVP in
+> Straznickas & Weis (Anthropic), *"HAWK-n Key Recovery Reduces to SVP in
 > Dimension n/2+1"*, which the HAWK team confirmed **approximately halves the
 > lattice-reduction block size** needed to recover an equivalent secret key. The
 > team stated that naïve countermeasures (doubling parameters or moving to
@@ -17,8 +17,9 @@ Pure-Rust port of the [HAWK](https://hawk-sign.info/) post-quantum signature sch
 > **Impact on this parameter set:** the attack lowers HAWK-512 key recovery from
 > the designers' claimed ≈2¹⁵⁰ gates to **≤2¹⁰⁸ gates** (AGPS20 model), so
 > **HAWK-512 no longer meets its claimed NIST Level I security.** The attack reads
-> only the public key and exploits the scheme's structure (`det B = 1`, public key
-> is the Gram matrix `B*B`); it **cannot** be mitigated in this port. HAWK-256 has
+> only the public key; the lever is a nontrivial automorphism of the key lattice
+> — the Galois involution τ: ζ ↦ −ζ — recoverable as a shortest vector of a
+> public rank-*n* lattice. It **cannot** be mitigated in this port. HAWK-256 has
 > been recovered end-to-end in practice.
 >
 > **Do not use this crate in production or to secure anything of value.** It is
@@ -28,7 +29,7 @@ Pure-Rust port of the [HAWK](https://hawk-sign.info/) post-quantum signature sch
 
 **Research/reference only — the underlying scheme is cryptographically broken (see security notice above) and was withdrawn from NIST standardization.** This crate is a faithful Rust port of the upstream reference C implementation (github.com/hawk-sign/dev@1b9fef5, MIT licensed). The entire keygen, sign, and verify pipeline has been validated byte-for-byte against the C reference via an FFI cross-check harness. That port fidelity is unaffected by the attack, which targets the scheme's mathematics rather than any implementation detail — but it means the port faithfully reproduces a broken scheme.
 
-- **51 FFI cross-check proptests** (256 cases each) validate primitive-level equivalence with C: modular arithmetic, NTT, big-integer operations, fixed-point FFT, Gaussian sampler, NTRU solver, keygen, sign, verify.
+- **50-test FFI cross-check** (`tests/cross_check.rs`) validates primitive-level equivalence with C: modular arithmetic, NTT, big-integer operations, fixed-point FFT, Gaussian sampler, NTRU solver, keygen, sign, verify. 49 byte-diff against the C reference (47 proptest-driven, plus 2 direct); the 50th is a Rust-only round-trip. Gated behind `--features cross-check-reference-c`, so it does not run under a default `cargo test` or in CI.
 - **Self-consistency proptests** verify keygen determinism, key/sig serialization round-trips, and sign/verify round-trips.
 - **NIST KAT pin** against the committed `PQCsignKAT_HAWK-512.rsp` from the reference harness: case 0's pk (1024 B) and sk (184 B) match byte-for-byte.
 - **Secret-key zeroization** via `zeroize::ZeroizeOnDrop`; constant-time public-key equality via `subtle::ConstantTimeEq`.
@@ -37,7 +38,7 @@ Pure-Rust port of the [HAWK](https://hawk-sign.info/) post-quantum signature sch
 
 **Not audited, and the scheme is broken.** Do not use to secure live funds, production authentication, or any setting where a compromise has material consequences — the security notice above supersedes any "testnet-ready" framing from earlier releases. See SECURITY.md for the full posture.
 
-**Upgrading from 0.1.0:** 0.1.1 fixes a weak-key BUFF break at verify and a signing path that could return an unserializable signature. Both are drop-in, with no API change. See CHANGELOG.md.
+**Upgrading from 0.1.0:** 0.1.1 fixes a weak-key BUFF break at verify and a signing path that could return an unserializable signature. Both are drop-in, with no API change. 0.1.2 (current) is documentation-only — it adds the security notice above and changes no code. See CHANGELOG.md.
 
 ## Usage
 

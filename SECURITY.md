@@ -23,6 +23,15 @@ This crate is a faithful Rust port of the upstream HAWK reference C implementati
 - **Impact on HAWK-512** (this crate's only parameter set): key-recovery cost drops from the designers' claimed ≈2¹⁵⁰ gates to **≤2¹⁰⁸ gates** (AGPS20 model). **HAWK-512 no longer meets its claimed NIST Level I security.** HAWK-256 has been recovered end-to-end in practice, in a few hours on a single server.
 - **Why the port cannot fix it.** The attack targets the scheme's mathematics, not any implementation detail. Nothing in this port (sampler, encoding, zeroization, constant-time work below) affects it; a byte-exact port faithfully reproduces the vulnerability. It does not transfer to Falcon, and is evaded only by conductors *m* ∈ {*p*ᵏ, 2*p*ᵏ} for odd prime *p* (equivalently, cyclotomic conductors *m* > 4 with cyclic (ℤ/*m*)ˣ) — not a change available within HAWK's parameter sets.
 
+### Separately: key recovery from signing-side leakage
+
+The break above needs only the public key. Independent work shows HAWK is *also* fragile when signing leaks, which is a different threat model and is **not** addressed by anything in this port:
+
+- **Sign leakage.** Brinkmann, Kraus & May, *"Halfspace Learning for Lattice Signature Key Recovery from Signs"* ([eprint 2026/1366](https://eprint.iacr.org/2026/1366)): leaking the sign — or merely the Hamming weight — of a randomness coordinate recovers a HAWK key from **30 signatures in about 10 minutes** at the 128-bit level in the noise-free model, tolerating up to 35% sign error. The method is not HAWK-specific (Falcon falls at 100 signatures, ML-DSA at 190,000), but HAWK is the scheme this crate ships.
+- **Sampler leakage.** Chi, Lee & Lee, *"HAWK with Hint: Algebraic Key Recovery from Side-Channel Leakage"* ([eprint 2026/699](https://eprint.iacr.org/2026/699)): only *partial* sampler leakage is needed, because HAWK's public algebraic structure amplifies it. Full-coefficient leakage recovers a HAWK-1024 key from a single signature; the exact-sign hint model reached 100% success over 100 independently generated keys from 14 signatures on the reference implementation.
+
+Both require observing the signer, so they do not change the conclusion for a signer in isolation. They do mean the ≤2¹⁰⁸-gate figure is not what an attacker who can watch signing actually faces.
+
 ## Implementation hardening posture
 
 The measures below concern the *implementation* only. They do not — and cannot — address the scheme-level break described above; they are documented because the port's fidelity and implementation hygiene remain useful for research and reference:
@@ -53,6 +62,7 @@ However:
 - Rust's default bounds checks on slice indexing panic on out-of-range access. Since our code uses `wrapping_*` arithmetic and explicit index math, OOB accesses shouldn't occur with well-formed inputs — and the fuzz harness + malformed-input proptests exercise adversarial inputs against the decode/verify boundary.
 - Allocator behavior (via `Vec<u16>`, `Vec<u32>`, etc.) is implementation-defined. Timing side-channels involving heap allocation are theoretically possible.
 - No formal constant-time audit (e.g., dudect, ctgrind, Jasmin) has been performed. The built-in timing smoke test is a regression guard, not a proof.
+- The signing-side leakage attacks described above are out of scope for this section: they exploit information the *signer* emits while signing, not the branch structure of this port. A constant-time implementation does not defend against them.
 
 ## Upstream caveats
 
