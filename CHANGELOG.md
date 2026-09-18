@@ -5,6 +5,51 @@ All notable changes to this crate are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.1.3 - 2026-09-18
+
+Documentation-only release correcting factual errors in the security
+documentation. No code behaviour changed; keygen, sign, and verify remain
+byte-exact against the reference C.
+
+### Fixed
+
+- **Attack mechanism, corrected across `README.md`, `SECURITY.md`, and the 0.1.2
+  entry below.** All three described the break as exploiting `det B = 1` and the
+  public key being the Gram matrix `B*B`; eprint 2026/1593 makes no such claim.
+  The lever is a nontrivial automorphism of the key lattice — the Galois
+  involution τ: ζ ↦ −ζ — recoverable as a shortest vector of a public rank-*n*
+  lattice. The 0.1.2 entry also said "one exact-SVP call" where the paper says
+  poly(*n*) calls.
+
+- **FFI cross-check count in `README.md`**, which claimed 51 proptests at 256
+  cases each. `tests/cross_check.rs` holds 50 tests: 49 byte-diff against the C
+  reference (47 proptest-driven plus 2 direct), and one is a Rust-only
+  round-trip. Both `README.md` and `SECURITY.md` now also record that these are
+  gated behind `--features cross-check-reference-c`, so they do not run under a
+  default `cargo test` or in CI — a fact the entries previously left ambiguous.
+
+- **Upstream disclaimer quote in `SECURITY.md`**, which was attributed to a C
+  reference `README` that is not part of the vendored tree and that contradicted
+  the verbatim text recorded in `c-reference/PROVENANCE.md`.
+
+### Added
+
+- **`SECURITY.md`: key recovery from signing-side leakage**, a threat model the
+  policy did not cover. Brinkmann, Kraus & May (eprint 2026/1366) recover a HAWK
+  key from 30 signatures at the 128-bit level in the noise-free model; Chi, Lee
+  & Lee (eprint 2026/699) need only partial Gaussian-sampler leakage. Both
+  require a leaking signer — unlike the public-key-only SVP break — but they
+  mean the ≤2¹⁰⁸-gate figure is not what an attacker who can observe signing
+  faces, and the constant-time section now records that.
+
+- **`SECURITY.md`: hardening entries** for the fault-injection and residual-BUFF
+  suites, and for the opaque verify-error contract. None were documented.
+
+### Changed
+
+- Author spelling aligned with the published papers ("Straznickas") throughout.
+- Version notes in `README.md` and `SECURITY.md` now name the current release.
+
 ## 0.1.2 - 2026-07-31
 
 Documentation-only release marking the HAWK scheme as broken and withdrawn from

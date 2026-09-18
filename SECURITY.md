@@ -80,9 +80,9 @@ absence of review.
 
 ## Release notes: what to run
 
-**Current release: 0.1.2.** It is documentation-only — no code behaviour
-changed — so everything in this document applies to it unchanged. The latest
-*security-relevant* changes shipped in **0.1.1**: two issues found and fixed
+**Current release: 0.1.3.** 0.1.2 and 0.1.3 are documentation-only — no code
+behaviour changed — so everything in this document applies to them unchanged.
+The latest *security-relevant* changes shipped in **0.1.1**: two issues found and fixed
 (see `CHANGELOG.md` for detail). Both were reproduced against this crate before
 being fixed, and both carry regression tests. If you are on 0.1.0, upgrade — it
 is a drop-in change with no API break.
